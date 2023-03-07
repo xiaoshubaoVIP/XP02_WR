@@ -1,0 +1,102 @@
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef __SYS_CFG_H
+#define __SYS_CFG_H
+
+
+
+
+
+#define SUPPORT_DEBUG
+#ifdef SUPPORT_DEBUG
+#define SUPPORT_CARIBRATION_DEBUG
+
+//#define SUPPORT_LIFE_TIME_DEBUG
+//#define SUPPORT_SYSTEM_MODE_DEBUG
+//#define SUPPORT_BATTERY_DEBUG
+//#define SUPPORT_SMOKE_DEBUG
+//#define SUPPORT_CO_DEBUG
+//#define SUPPORT_NET_FUNCTION_DEBUG
+//#define SUPPORT_HALT_DEBUG
+//#define TEMP_DEBUG
+#endif
+
+#define TEMPCALIOLD
+
+#define SUPPORT_UART 
+//#define SUPPORT_OPA1_OUTPUT
+//#define SUPPORT_CO_FUNCTION
+
+#define SUPPORT_ISINK0_FOR_IR
+
+//product life time
+#define LIFE_TIME								(3650)//10*365   10 years+100 day(safe victor)
+#define LIFE_TIME_FORBIT_MUTE					(3650+30)//10*365   10 years+100 day(safe victor)
+
+
+#define SUPPORT_XP02_WR
+//#define SUPPORT_XP02_S_WR
+
+
+//model name  
+#ifdef  SUPPORT_XP02_WR
+	#define MODEL_NAME								"XP02_WR"
+	#define SUPPORT_CO_FUNCTION
+	#define SUPPORT_RF_NET_FUNCTION
+	#define SUPPORT_SPEAK_FUNCTION
+#elif defined(SUPPORT_XP02_S_WR)
+	#define MODEL_NAME								"XP02_S_WR"
+	//#define SUPPORT_CO_FUNCTION
+	#define SUPPORT_RF_NET_FUNCTION
+	#define SUPPORT_SPEAK_FUNCTION
+#endif
+
+// co spec set
+#define SUPPORT_UL2034_UL217
+//#define SUPPORT_EN50291_EN14604
+
+
+//revision
+#define FW_VERSION										"1.1.3"
+
+#define SMOKE_ALARM_LEVEL								(420)		//183mv-336mv
+
+//system frequence
+#define _XTAL_FREQ										(4000000)		//    //4MHZ
+
+
+//eeprom address
+#define FLASH_ADDR_LIFE_TIME_DAYS_MSB			(0x00)
+#define FLASH_ADDR_LIFE_TIME_DAYS_LSB			(FLASH_ADDR_LIFE_TIME_DAYS_MSB+1)
+#define FLASH_ADDR_PAIRED_MODE_FLAG				(FLASH_ADDR_LIFE_TIME_DAYS_LSB+1)
+
+//time set
+#define BATTERY_CHECK_COUNT                     (6)
+#define ONE_DAY                                 (10500)
+#define STANDBY_MODE_CYCLE_COUNT                (6)
+#define LIFETIME_MUTE_COUT						(9900)					// 22h=22*60*60=86400/SLEEP_TIME=9900
+#define LOWBAT_MUTE_COUT						(4500)					// 10h=10*60*60=86400/SLEEP_TIME=4500
+#define LATCHING_CO_ALARM						(3)						// 27s
+
+//led control set
+#define LED_ON_TIME_FAULT                       (50000)					// 15ms
+#define LED_ON_TIME_STANDBY                 	(6000)					// 6ms
+
+//voltage set
+#define EMC_BATTERY_DEFFER                      (70)					// for EMC bat
+
+#if defined(SUPPORT_XP04_WR) || defined(SUPPORT_XP04_S_WR)
+#define BATTERY_LEVEL_LOW						(7200)					// 7.2V*(1/3.4) = 2.118V
+#define BATTERY_LEVEL_LOW_FORBIT_MUTE			(7000)					// 7.0V*(1/3.4) = 2.058V
+#define VDD_FROM_LDO   3000
+#else
+#define BATTERY_LEVEL_LOW						(2700)					// 
+#define BATTERY_LEVEL_LOW_FORBIT_MUTE			(2600)					//
+#define VDD_FROM_LDO   3300
+#endif
+
+/**
+  * @}
+  */
+
+#endif /* __SYS_CFG_H */
+

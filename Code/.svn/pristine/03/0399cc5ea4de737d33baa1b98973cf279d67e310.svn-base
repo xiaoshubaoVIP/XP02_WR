@@ -1,0 +1,89 @@
+/****************************************************************************/
+/*	File   :             Smoke.h               */
+/*	Author :                       songjiang                                */
+/*	Version:                          V1.0                                  */
+/*	Date   :                    2019/7/25,16:25:54                         */
+/********************************Modify History******************************/
+/*   yy/mm/dd     F. Lastname    Description of Modification                */
+/****************************************************************************/
+/*	Attention:                                                              */
+/*	CopyRight:                CopyRight 2017--2025                          */
+/*           Shenzhen Xiaojun Technology Co., Ltd.  Allright Reserved        */
+/*	Project :                      SC01                           */
+/****************************************************************************/
+
+#ifndef __SMOKE_H__
+#define __SMOKE_H__
+
+#include "main.h"
+
+#define SMOKE_ALARM_CHECK_COUNT                 (1)                     // 9s/SLEEP_TIME=1
+#define SMOKE_MUTE_TIMEOUT_COUNT                (135)                   // 9min=9*60=540s/4=135
+#define SMOKE_CALI_COUNT                     	(800)					// 
+
+#define SmokeDelayDefault					(30)
+#define SmokeDelayAlarm						(30)
+#define SmokeCheckTime						(3000)
+#define SmokeCancelAlarmTime				(6)
+
+//caribration
+#define SMOKE_CARIBRATION_FLAG              (0x5A)
+
+typedef struct SmokeObject SmokeObjectTag;
+struct SmokeObject{
+	
+	uint8_t TempData;        // temperature data
+	uint8_t SmokeSampleTimeCnt;// OP delay time flag
+	uint16 SmokeDarkAvg;   // infrared close
+	uint16 SmokeLightAvg;  // infrared open
+	uint16 SmokeBLightAvg;  // infrared open
+	
+	uint8 SmokeDetCnt;		//  alarm counter
+	uint8 SmokeInactCnt;    // alarm cancel counter
+	uint8 SmokeTransFaultCnt;//transmmit fault counter
+	uint16 SmokeSensortive;  //alarm level
+	uint16 SmokeCompensationData;// compensation data
+	uint8 SmokeBasicTemp;       // eeprom temp 
+	uint8 SmokeCompensationFlag;//compensation falg  1:open 0 :close
+	uint8 SmokeCompensationCnt;// compensation counter  16 times
+	uint8 SmokeCariFlag;       // calibarion flag 0x5a
+	uint8 SmokeVanos0;         //smoke op0 init
+	uint8 SmokeVanos1;         //smoke op1 init
+
+	uint8_t SmokeCaliOPA;    //calibration OPA [7,13] 
+	uint8_t SmokeCaliOPA1;    //calibration OPA1 [7,13] 
+	
+};
+#define ISINK0_Pin    _pc2
+#define ISINK0_ON()    ISINK0_Pin=1
+#define ISINK0_OFF()   ISINK0_Pin=0
+
+#define ISINK1_Pin    _pc3
+#define ISINK1_ON()    ISINK1_Pin=1
+#define ISINK1_OFF()   ISINK1_Pin=0
+
+
+
+extern SmokeObjectTag SmokeAO;
+void SmokeDetInit(void);
+
+void AdcGetSmokeSample(uint8 IRCtl, uint8 IRTest,uint8_t SampleTimes);
+
+void SmokeAlarmCheck(void);
+uint8_t GetSmokeTemp(void);
+void  SmokeCheckCali(void);
+uint16 GetVol(uint16 Vdd, uint16 HexVal);
+void PowerOnDisplay(void);
+
+void SmokeCaliMain(void);
+void SmokeTestMain(void);
+void SmokeAlarmMain(void);
+void SmokeMuteMain(void);
+void SmokeErrMain(void);
+
+#ifdef SUPPORT_RF_NET_FUNCTION
+void RfSmokeAlarmMain(void);
+#endif
+
+#endif
+

@@ -1,0 +1,169 @@
+/****************************************************************************/
+/*	File   :             PwrManager.c               */
+/*	Author :                       songjiang                                */
+/*	Version:                          V1.0                                  */
+/*	Date   :                    2019/7/25,16:30:4                         */
+/********************************Modify History******************************/
+/*   yy/mm/dd     F. Lastname    Description of Modification                */
+/****************************************************************************/
+/*	Attention:                                                              */
+/*	CopyRight:                CopyRight 2017--2025                          */
+/*           Shenzhen Xiaojun Technology Co., Ltd.  Allright Reserved        */
+/*	Project :                      SC01                           */
+/****************************************************************************/
+#include "base.h"
+#include "PwrManager.h"
+#include "Module.h"
+#include "main.h"
+#include "Smoke.h"
+PwrTag PwrAO;
+
+
+void PwrInit(void)
+{
+	PwrAO.BatCheckCntlow = 0;
+	PwrAO.BatCheckCnt1in3 = 0;
+	PwrAO.BatCheckCnt2in3 = 0;
+	PwrAO.standbycnt = 0;
+}
+/**********************************************************************/
+//Description:		EnteryLowPower										
+//Parameters:                        									
+//Return:   											
+//Date:  
+//author:		    song
+/**********************************************************************/
+void EnteryLowPower(void)
+{
+    // FHIDEN:bit1
+    _fhiden = 0;        // HIRC disable when CPU is switched off
+
+    // FSIDEN:bit0
+    _fsiden = 1;        // LIRC enable when CPU is switched on
+#ifdef SUPPORT_HALT_DEBUG 
+	printf("halt_i, %d\n", SysAO.eEventFlg);
+#endif
+
+	do
+	{
+		_clrwdt();	
+		GCC_HALT();
+
+		if(TEST_KEY_is_L())
+		{
+			break;
+		}
+
+#ifdef SUPPORT_RF_NET_FUNCTION
+		if(UART_INT_IRQ_PIN == RESET)
+		{
+			printf("RF int\n");
+			PwrAO.standbycnt = LowPwrMaxCnt;
+			GCC_DELAY(2000);
+		}
+#endif
+	}
+	while (PwrAO.standbycnt++<LowPwrMaxCnt);
+	PwrAO.standbycnt = 0;
+
+	if(TEST_KEY_is_H())
+	{
+		SysteSetSig(eEventSigWakeup);
+	}		
+
+#ifdef SUPPORT_HALT_DEBUG 
+	printf("halt_o\n");
+#endif
+}
+/**********************************************************************/
+//Description:		BatteryCheckHandle for check battery voltag														  
+//Parameters:                        												  
+//Return:   											
+//Date:  
+//author:		    song
+/**********************************************************************/
+uint16_t BatteryCheckHandle(void)
+{
+	uint16_t BatSample = 0;
+	uint16_t BatVol = 0;
+#ifdef SUPPORT_XP04
+	uint32_t Value = 0;
+#endif
+
+	BatSample = GetAdcSample(eAdcBatChannel, FALSE);
+	BatVol = GetVol(VDD_FROM_LDO, BatSample);
+#if defined(SUPPORT_XP04_WR) || defined(SUPPORT_XP04_S_WR)
+	Value = (((uint32_t)BatVol)<<5) + (((uint32_t)BatVol)<<1);
+	BatVol = Value/10;
+#else
+	BatVol = BatVol<<1;
+#endif
+
+
+#ifdef SUPPORT_BATTERY_DEBUG
+	printf("mcu bat:");
+	PrintVol(BatVol);
+	printf("(%d)\n\n", BatSample);
+#endif
+
+	if(BatVol < BATTERY_LEVEL_LOW_FORBIT_MUTE)				// forbit mute voltage
+	{
+		PwrAO.BatCheckCntForbitMute++;
+		if(PwrAO.BatCheckCntForbitMute > 1)
+		{
+			PwrAO.BatCheckCntForbitMute = 1;
+			SysAO.eEventFlg |= eEventFlagLowBatForbitMute;
+		}
+	}
+	else if(BatVol < BATTERY_LEVEL_LOW)						// low voltage detect
+	{
+		PwrAO.BatCheckCntlow++;
+		if(PwrAO.BatCheckCntlow > 1)
+		{
+			PwrAO.BatCheckCntlow = 1;
+			if(SysAO.eEventFlg & eEventFlagLowBatMute)
+			{
+				if(SysAO.EventMuteTimeCnt>LOWBAT_MUTE_COUT)
+				{
+					SysAO.eEventFlg &= ~eEventFlagLowBatMute;
+					SysAO.eEventFlg |= eEventFlagLowBat;
+				}
+				else
+				{
+					SysAO.EventMuteTimeCnt++;
+				}
+			}
+			else
+			{
+				SysAO.eEventFlg |= eEventFlagLowBat;
+			}
+		}
+	}
+	else
+	{
+		PwrAO.BatCheckCntlow = 0;
+		PwrAO.BatCheckCntForbitMute = 0;
+		SysAO.eEventFlg &= ~eEventFlagLowBat;
+		SysAO.eEventFlg &= ~eEventFlagLowBatForbitMute;
+	}
+
+	return BatVol;
+}
+
+/**********************************************************************/
+//Description:		BatteryCheck										
+//Parameters:                        									
+//Return:   											
+//Date:  
+//author:		    song
+/**********************************************************************/
+void BatteryCheck(void)
+{	
+	if((SysAO.SlpTimeCnt%BATTERY_CHECK_COUNT)==(BATTERY_CHECK_COUNT-1))
+	{
+		BatteryCheckHandle();
+	}
+}
+
+
+

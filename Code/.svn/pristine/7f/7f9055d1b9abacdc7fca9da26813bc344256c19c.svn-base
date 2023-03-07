@@ -1,0 +1,6 @@
+---- FLASH_ADDR_PAIRED_MODE_FLAG Matches (5 in 2 files) ----
+RfInit in RF.c (E:\x-sense_svn\XP02\XP02\src) : 	RfAO.PairMode =  E2promRead(FLASH_ADDR_PAIRED_MODE_FLAG);
+RfPairMain in RF.c (E:\x-sense_svn\XP02\XP02\src) : 			E2promWrite(FLASH_ADDR_PAIRED_MODE_FLAG, RfAO.PairMode);
+RfPairMain in RF.c (E:\x-sense_svn\XP02\XP02\src) : 			E2promWrite(FLASH_ADDR_PAIRED_MODE_FLAG, RfAO.PairMode);
+sys_cfg.h (E:\x-sense_svn\XP02\XP02\inc) line 82 : #define FLASH_ADDR_PAIRED_MODE_FLAG				(FLASH_ADDR_LIFE_TIME_DAYS_LSB+1)
+sys_cfg.h (E:\x-sense_svn\XP02\XP02\inc) line 83 : #define FLASH_ADDR_CARIBRATION_VDD_MSB			(FLASH_ADDR_PAIRED_MODE_FLAG+1)

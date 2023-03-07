@@ -1,0 +1,1416 @@
+#include "main.h"
+#include "Module.h"
+#include "Polling.h"
+
+CoObjectTag COAO = {0}; 
+
+#define CAIL_CO_WAIT_TIME	(50)
+#define SAMPLE_CO_TIME_CNT	(16)
+
+const uint16_t co_temp_slope_rate[91]={
+	655,664,674,684,694,704,714,723,733,742,                // -20 - -11
+	752,761,771,780,789,799,808,817,826,835,                // -10 - -1
+	844,                                                  	// 0
+	852,861,870,878,887,895,903,911,919,927,                // 1 - 10
+	935,943,950,958,965,972,980,987,994,1000,               // 11 - 20
+	1007,1013,1020,1026,1032,1038,1044,1050,1055,1060,      // 21 - 30
+	1066,1071,1076,1080,1085,1089,1094,1098,1101,1105,      // 31 - 40
+	1109,1112,1115,1118,1121,1124,1126,1128,1130,1132,      // 41 - 50
+	1134,1135,1136,1137,1138,1139,1139,1139,1139,1139,      // 51 - 60
+	1139,1139,1139,1139,1139,1139,1139,1139,1139,1139       // 61 - 70
+};
+
+const uint16_t co_temp_offset_rate[91]=
+{
+	930,930,930,930,930,			//-20~-15
+	930,935,937,938,938,
+	939,939,943,943,943,
+	946,948,947,949,950,
+	951,							//0
+	951,951,953,955,959,			//1~5
+	959,960,958,961,962,
+	963,965,967,968,972,			//11~15
+	971,972,975,977,981,
+	982,986,990,993,1000,			//21~25
+	1005,1010,1014,1022,1027,
+	1039,1047,1061,1070,1083,		//31~35
+	1099,1110,1127,1150,1168,
+	1194,1216,1244,1278,1311,		//40~45
+	1348,1390,1437,1483,1536,
+	1587,1642,1700,1758,1822,		//50~55
+	1899,1987,2086,2178,2251,
+	2330,2414,2499,2587,2671,		//60~65
+	2759,2842,2924,2987,3000,		//66~70
+};
+
+typedef enum _eCoTimeOut
+{
+	eCoCail = 0,
+	eCoAlarm,
+	eCoAlarmInterVal,
+	eCoErr,
+	eCoNetAlarmTimeout,
+	eCoDelaySpeak,
+}eCoTimeOut;
+
+
+void InitCO_Data(void)
+{
+	COAO.CoCariFlag=0;
+	COAO.CoAvg=0;
+	COAO.CoCariStep=0;
+	COAO.CoSlope=0;
+	COAO.CoOffset=0;
+	COAO.TempData_0PPM=0;
+	COAO.TempData_150PPM=0;
+	
+	COAO.ppm_caribration_step=0;
+	COAO.ppm_caribration_flag=0;
+
+	COAO.COAlarmThreshold0 = 0;
+	COAO.COAlarmThreshold1 = 0;
+	COAO.COAlarmThreshold2 = 0;
+	COAO.COAlarmThreshold3 = 0;
+	COAO.COAlarmThreshold4 = 0;
+
+	COAO.ppm_caribration_slope=0;
+	COAO.ppm_caribration_offset=0;
+	COAO.fault_short_count=0;
+	COAO.fault_open_count=0;
+}
+
+
+/**********************************************************************/
+//Description:		CoTemperatureCompensation
+//Parameters:			
+//Return:   											
+//Date:  
+//author:			quanwu.xu
+/**********************************************************************/
+static uint16_t CoTemperatureCompensation(uint16_t Ppm, uint8_t TempValue)
+{
+	uint16_t ret = Ppm;
+
+	if(TempValue < 10)					//<-10
+	{
+		ret +=	(ret * 30) / 100;
+	}
+	else if(TempValue < 20)				//-10 ~ 0
+	{
+		ret +=	(ret * 20) / 100;
+	}
+	else if(TempValue < 30)				//0 ~ 10
+	{
+		ret +=	(ret * 10) / 100;
+	}
+	else if(TempValue < 55)				//10 ~ 35
+	{
+
+	}
+	else if(TempValue < 65)				//35 ~ 45
+	{
+		ret -=	(ret * 10) / 100;
+	}
+	else if(TempValue < 80)				//45 ~ 60
+	{
+		ret -=	(ret * 15) / 100;		
+	}
+	else								// > 60
+	{
+		ret -=	(ret * 30) / 100;
+	}
+	
+	return ret;
+}
+
+
+/**********************************************************************/
+//Description:		Co5000ppmCompensation
+//Parameters:			
+//Return:   											
+//Date:  
+//author:			quanwu.xu
+/**********************************************************************/
+static uint16_t Co5000ppmCompensation(uint16_t Ppm)
+{
+	uint16_t ret = Ppm;
+	static uint16_t Co5000ppmTimeCnt = 0;
+	static uint16_t AfterCo5000ppmTimeCnt = 0;
+	static bool Co5000ppmComsationFlag = FALSE;
+
+	if(Ppm > 700)
+	{
+		if((Co5000ppmComsationFlag = FALSE) && (Co5000ppmTimeCnt++ > 60))
+		{
+			Co5000ppmComsationFlag = TRUE;
+			AfterCo5000ppmTimeCnt = 0;
+		}
+	}
+	else
+	{
+		Co5000ppmTimeCnt = 0;
+	}
+
+#ifdef SUPPORT_CO_DEBUG
+	printf("5000_Flag=%d, cnt=%d\n", Co5000ppmComsationFlag, AfterCo5000ppmTimeCnt);
+	printf("ppm=%d\n", Ppm);
+#endif
+
+	if(Co5000ppmComsationFlag == TRUE)
+	{
+		AfterCo5000ppmTimeCnt++;
+		if(AfterCo5000ppmTimeCnt > 2520)
+		{
+			Co5000ppmComsationFlag = FALSE;
+		}
+		else
+		{
+			if(ret>20)
+			{
+				if(AfterCo5000ppmTimeCnt > 720)    	// 6h=360*6 = 2160
+				{
+				 	ret += 6;
+				}
+				else if(AfterCo5000ppmTimeCnt > 600)    // 5h=360*5 = 1800
+				{
+					ret += 8;
+				}	
+				else if(AfterCo5000ppmTimeCnt>480)    	// 4h=360*4= 1440
+				{
+					ret += 12;
+				}
+				else if(AfterCo5000ppmTimeCnt>360)    	// 3h=360*3=1080
+				{
+					ret += 16;
+				}
+				else if(AfterCo5000ppmTimeCnt>120)    	// 1h=360*1=360
+				{
+					ret += 20;
+				}
+				else
+				{
+					ret += 20;
+				}
+			}
+		}
+	}
+	
+	return ret;
+}
+
+
+static uint16_t CoGetPpm(uint16_t CoSample,int8 temp)
+{
+	uint8_t YearsCnt = 0;
+	uint16_t ppm=0;
+	//    uint32_t temp_offset=(uint32_t)COAO.CoOffset;
+	//    uint32_t temp_slope=(uint32_t)COAO.CoSlope;
+	uint16_t offset=0;
+	uint16_t slope=0;
+
+	offset=(uint16_t)((uint32_t)COAO.CoOffset*co_temp_offset_rate[temp]/1000);
+	slope=(uint16_t)((uint32_t)COAO.CoSlope*co_temp_slope_rate[temp]/1000);
+
+	if(CoSample>=offset)
+	{
+		ppm = (CoSample - offset)*10/slope;
+#ifdef SUPPORT_CO_DEBUG
+		printf("co:%d ppm \n", ppm);
+#endif
+	}
+	else
+	{
+		ppm = 0;
+#ifdef SUPPORT_CO_DEBUG
+		printf("offset:%d, ",offset);
+		printf("Co_Sample:%d \n\n",CoSample);
+#endif
+	}
+
+	if(SysAO.DebugOnFlag == TRUE)
+	{
+		printf("ppm1=%d\n", ppm);
+	}
+
+	YearsCnt = SysAO.LifeTimeDays/365;
+	ppm = (uint16_t)(((uint32_t)ppm*(100+YearsCnt))/100);
+
+	if(SysAO.DebugOnFlag == TRUE)
+	{
+		printf("ppm2=%d\n", ppm);
+	}
+
+	return ppm;
+}
+
+
+#ifdef SUPPORT_UL2034_UL217
+static void COPpmULCheck(CoObjectTag *pCO,uint16_t Ppm)
+{
+	static uint8_t CoCancelAlarmNum = 0;
+	//printf("ULPPM=%d\n",Ppm);
+
+	if(Ppm<=COPPMLEVEL0)								// <70ppm
+	{
+		CoCancelAlarmNum++;
+		if(CoCancelAlarmNum>=3)
+		{
+			CoCancelAlarmNum=3;
+			if((SysAO.eMode == CoAlarmMode) || (SysAO.eMode == CoMuteMode))
+			{
+				SysteSetSig(eEventSigCoAlarmCancel);
+			}
+		}
+		pCO->COAlarmThreshold0 = 0;
+		pCO->COAlarmThreshold1 = 0;
+		pCO->COAlarmThreshold2 = 0;
+		pCO->COAlarmThreshold3 = 0;
+		pCO->COAlarmThreshold4 = 0;
+	}
+	else  //>=30 ppm
+	{
+		CoCancelAlarmNum = 0;
+		if(Ppm>COPPMLEVEL0&&Ppm<=COPPMLEVEL1)			// 70~150
+		{
+			pCO->COAlarmThreshold0++;
+		}else if(Ppm>COPPMLEVEL1&&Ppm<=COPPMLEVEL2) 	// 150~400
+		{
+			pCO->COAlarmThreshold0++;
+			pCO->COAlarmThreshold1++;
+		}
+		else if(Ppm>COPPMLEVEL2&&Ppm<=COPPMLEVEL3)		//400~5000
+		{
+			pCO->COAlarmThreshold0++;
+			pCO->COAlarmThreshold1++;
+			pCO->COAlarmThreshold2++;
+		}else if(Ppm>COPPMLEVEL3)						// >5000ppm
+		{
+			pCO->COAlarmThreshold0++;
+			pCO->COAlarmThreshold1++;
+			pCO->COAlarmThreshold2++;
+			pCO->COAlarmThreshold3++;
+		}
+		
+		if((pCO->COAlarmThreshold0 > (CO_ALARM_70PPM_TIME*60/(SLEEP_TIME*CO_CHECK_COUNT))) ||
+			(pCO->COAlarmThreshold1 > (CO_ALARM_150PPM_TIME*60/(SLEEP_TIME*CO_CHECK_COUNT))) ||
+				(pCO->COAlarmThreshold2 > (CO_ALARM_400PPM_TIME*60/(SLEEP_TIME*CO_CHECK_COUNT))))
+		{
+			SysteSetSig(eEventSigCoAlarm);
+			pCO->COAlarmThreshold0 = 0;
+			pCO->COAlarmThreshold1 = 0;
+			pCO->COAlarmThreshold2 = 0;
+			pCO->COAlarmThreshold3 = 0;
+			pCO->COAlarmThreshold4 = 0;
+			printf("Event:co alarm\n");
+		}
+	}
+
+	if(SysAO.DebugOnFlag == TRUE)
+	{
+		printf("T0 = %d, ",pCO->COAlarmThreshold0);
+		printf("T1 = %d, ",pCO->COAlarmThreshold1);
+		printf("T2 = %d, ",pCO->COAlarmThreshold2);
+		printf("T3 = %d, ",pCO->COAlarmThreshold3);
+		printf("ppm = %d\n", Ppm);
+	}
+}
+
+#else
+/******************************************************************************
+**Description:																	
+** Parameters:                        											
+**     Return:   																
+*******************************************************************************/
+
+static void COPpmBSICheck(CoObjectTag *pCO,uint16_t Ppm)
+{
+	static uint8_t CoCancelAlarmNum = 0;
+
+	if(Ppm<=COPPMLEVEL0)// <30ppm
+	{
+		CoCancelAlarmNum++;
+		if(CoCancelAlarmNum>=3)
+		{
+			CoCancelAlarmNum=3;
+			if((SysAO.eMode == CoAlarmMode) || (SysAO.eMode == CoMuteMode))
+			{
+				SysteSetSig(eEventSigCoAlarmCancel);
+			}
+		}
+		pCO->COAlarmThreshold0 = 0;
+		pCO->COAlarmThreshold1 = 0;
+		pCO->COAlarmThreshold2 = 0;
+		pCO->COAlarmThreshold3 = 0;
+		pCO->COAlarmThreshold4 = 0;
+	}
+	else
+	{
+		CoCancelAlarmNum = 0;
+		if(Ppm>COPPMLEVEL0&&Ppm<=COPPMLEVEL1)		// <50ppm
+		{
+			pCO->COAlarmThreshold0++;
+
+		}
+		else if(Ppm>COPPMLEVEL1&&Ppm<=COPPMLEVEL2)	// <100ppm
+		{
+			pCO->COAlarmThreshold0++;
+			pCO->COAlarmThreshold1++;
+
+		}else if(Ppm>COPPMLEVEL2&&Ppm<=COPPMLEVEL3)	// <300ppm
+		{
+			pCO->COAlarmThreshold0++;
+			pCO->COAlarmThreshold1++;
+			pCO->COAlarmThreshold2++;
+
+		}
+		else if(Ppm>COPPMLEVEL3&&Ppm<=COPPMLEVEL4)	// <5000ppm
+		{
+			pCO->COAlarmThreshold0++;
+			pCO->COAlarmThreshold1++;
+			pCO->COAlarmThreshold2++;
+			pCO->COAlarmThreshold3++;
+
+		}
+		else if(Ppm>COPPMLEVEL4)// >5000ppm
+		{
+			pCO->COAlarmThreshold0++;
+			pCO->COAlarmThreshold1++;
+			pCO->COAlarmThreshold2++;
+			pCO->COAlarmThreshold3++;
+			pCO->COAlarmThreshold4++;
+		}
+		
+		if((pCO->COAlarmThreshold0 > (CO_ALARM_30PPM_TIME*60/(SLEEP_TIME*CO_CHECK_COUNT))) ||
+		(pCO->COAlarmThreshold1 > (CO_ALARM_50PPM_TIME*60/(SLEEP_TIME*CO_CHECK_COUNT))) ||
+		(pCO->COAlarmThreshold2 > (CO_ALARM_100PPM_TIME*60/(SLEEP_TIME*CO_CHECK_COUNT))) ||
+		(pCO->COAlarmThreshold3 > (CO_ALARM_300PPM_TIME*60/(SLEEP_TIME*CO_CHECK_COUNT))))
+		{
+			SysteSetSig(eEventSigCoAlarm);
+			pCO->COAlarmThreshold0 = 0;
+			pCO->COAlarmThreshold1 = 0;
+			pCO->COAlarmThreshold2 = 0;
+			pCO->COAlarmThreshold3 = 0;
+			pCO->COAlarmThreshold4 = 0;
+		}
+	}
+	
+	if(SysAO.DebugOnFlag == TRUE)
+	{
+		printf("T0 = %d, ",pCO->COAlarmThreshold0);
+		printf("T1 = %d, ",pCO->COAlarmThreshold1);
+		printf("T2 = %d, ",pCO->COAlarmThreshold2);
+		printf("T3 = %d, ",pCO->COAlarmThreshold3);
+		printf("T4 = %d, ppm=%d\n",pCO->COAlarmThreshold4, Ppm);
+	}
+}
+#endif
+
+
+
+/**********************************************************************/
+//Description:		CoAlarmTimeOut
+//Parameters:			
+//Return:   											
+//Date:  
+//author:			song.jiang
+/**********************************************************************/
+uint16_t CoAlarmCheck(void)
+{
+	static uint8_t LatchingCo100PpmCnt = 0;
+	static uint16_t co_ppm=0;
+	uint16_t CoSample=0;
+	uint16_t CoSampleVoltage = 0;
+
+	CoSample = GetAdcSample(eAdcCoChannel, FALSE);
+
+	CoSampleVoltage = GetVol(PwrAO.BatVolVdd, CoSample);
+	co_ppm = CoGetPpm(CoSampleVoltage,SysAO.TempData);
+
+#if  defined(SUPPORT_CO_DEBUG) || defined(SENSOR_TEMP_TEST)
+	CoSampleVoltage = GetVol(PwrAO.BatVolVdd, CoSample);;
+	printf("co sample:");
+	PrintVol(CoSampleVoltage);
+	printf("(%d)\n", CoSample);
+	printf("ppm=%d\n", co_ppm);
+#endif
+
+
+	if(SysAO.DebugOnFlag == TRUE)
+	{
+		printf("Co:%d(adc),",CoSample);
+		printf("%d(mV),", CoSampleVoltage);
+		printf("ppm=%d\n", co_ppm);
+	}
+
+	co_ppm = CoTemperatureCompensation(co_ppm, SysAO.TempData);
+
+	co_ppm = Co5000ppmCompensation(co_ppm);
+
+	if(co_ppm>=1000)
+	{
+		co_ppm=999;
+	}
+
+	if(co_ppm>=150)
+	{
+		LatchingCo100PpmCnt++;
+		if(LatchingCo100PpmCnt > 6)
+		{
+			LatchingCo100PpmCnt = 6;
+		}
+	}
+	else if(co_ppm < COPPMLEVEL0)
+	{
+		LatchingCo100PpmCnt = 0;
+	}
+
+
+	if(SysAO.DebugOnFlag == TRUE)
+	{
+		printf("T=%d, ", (SysAO.TempData-20));
+		printf("ppm2=%d\n", co_ppm);
+	}
+
+	//alarm check
+#ifdef SUPPORT_UL2034_UL217
+	COPpmULCheck(&COAO,co_ppm);		
+#else
+	COPpmBSICheck(&COAO,co_ppm);
+#endif
+
+	return co_ppm;
+}
+
+
+/**********************************************************************/
+//Description:		LoadCOData
+//Parameters:                        								
+//Return:   											
+//Date:  
+//author:			quanwu.xu
+/**********************************************************************/
+bool LoadCOData(void)
+{
+	bool CailCoRes = FALSE;
+
+	COAO.CoCariFlag = E2promRead(FLASH_ADDR_CO_CARIBRATION_FLAG);
+	COAO.CoCariStep = E2promRead(FLASH_ADDR_CARIBRATION_STEP);
+	COAO.CoSlope = E2promRead(FLASH_ADDR_CARIBRATION_PPM_SLOPE_MSB);
+	COAO.CoSlope <<= 8;
+	COAO.CoSlope |= E2promRead(FLASH_ADDR_CARIBRATION_PPM_SLOPE_LSB);
+	COAO.CoOffset = E2promRead(FLASH_ADDR_CARIBRATION_PPM_OFFSET_MSB);	 
+	COAO.CoOffset <<= 8;
+	COAO.CoOffset|=E2promRead(FLASH_ADDR_CARIBRATION_PPM_OFFSET_LSB);
+	COAO.TempData_0PPM = E2promRead(FLASH_ADDR_CARIBRATION_0_TEMPERATURE);
+	COAO.TempData_150PPM = E2promRead(FLASH_ADDR_CARIBRATION_150_TEMPERATURE);
+	
+	if((COAO.CoCariFlag == CO_CARIBRATION_FLAG) )
+	{
+		CailCoRes = TRUE;
+		printf("co: b = %d, ",COAO.CoOffset);
+		printf("k = %d\n",COAO.CoSlope);	
+		PwrAO.standbycnt = LowPwrMaxCnt;					//must for current electricity test
+	}
+	else
+	{
+		if(COAO.CoCariStep == 0xFF)
+		{
+			COAO.CoCariStep = 1;
+		}
+		else
+		{
+			COAO.CoCariStep = COAO.CoCariStep+1;
+		}
+		printf("Cail Step = %d\n", COAO.CoCariStep);
+	}
+
+	return CailCoRes;
+}
+
+
+/**********************************************************************/
+//Description:		CoAlarmTimeOut
+//Parameters:			
+//Return:   											
+//Date:  
+//author:			song.jiang
+/**********************************************************************/
+eCOState COSelfCheck(CoObjectTag *pCO)
+{ 
+	eCOState ret = eCONO;//0 :normal 1:CO 2:err
+	int16 temp=0;
+	uint16_t sample=0,fault_sample=0;
+	static bool ErrFlag = FALSE;
+
+	sample=GetAdcSample(eAdcCoChannel, FALSE);
+	sample = GetVol(PwrAO.BatVolVdd, sample);
+	fault_sample = GetAdcSample(eAdcCoChannel, TRUE);
+	fault_sample = GetVol(PwrAO.BatVolVdd, fault_sample);
+	temp=fault_sample-sample;
+
+	
+#ifdef SUPPORT_CO_DEBUG 
+	printf("fault_sample=%dmV\n",fault_sample);
+	printf("sample=%dmV\n",sample);
+#endif
+	if((fault_sample>SENSOR_OPEN_FAULT_SAMPLE) && (SysAO.TempData<74))
+	{
+		GCC_DELAY(50000);	   // 15000 150ms//DelayMs(20);
+		sample=GetAdcSample(eAdcCoChannel, FALSE);
+
+		if(sample<SENSOR_OPEN_SAMPLE)
+		{
+			ret = eCOErr;
+			pCO->fault_open_count++;
+			pCO->fault_short_count=0;
+			pCO->COAlarmThreshold0 = 0;
+			pCO->COAlarmThreshold1 = 0;
+			pCO->COAlarmThreshold2 = 0;
+			pCO->COAlarmThreshold3 = 0;
+			pCO->COAlarmThreshold4 = 0;
+		}
+	}
+	else if(((fault_sample>SENSOR_SHORT_SAMPLE_MIN)
+		&&(fault_sample<SENSOR_SHORT_SAMPLE_MAX))
+		&&((temp<100)&&(temp>-100)) && (SysAO.TempData<74))
+	{
+		ErrFlag = TRUE;
+		ret = eCOErr;
+		pCO->fault_short_count++;
+		pCO->fault_open_count=0;
+		pCO->COAlarmThreshold0 = 0;
+		pCO->COAlarmThreshold1 = 0;
+		pCO->COAlarmThreshold2 = 0;
+		pCO->COAlarmThreshold3 = 0;
+		pCO->COAlarmThreshold4 = 0;
+	}
+	else
+	{
+		pCO->fault_open_count=0;
+		pCO->fault_short_count=0;
+		if(ErrFlag == TRUE)
+		{
+			ErrFlag = FALSE;
+			SysteSetSig(eEventSigCoErrRecovery);
+		}
+	}
+
+	if(pCO->fault_open_count>=2)
+	{
+		pCO->fault_open_count=2;
+		ret = eCOOPEN;
+		SysteSetSig(eEventSigCoErr);
+		ErrFlag = TRUE;
+	}
+	else if(pCO->fault_short_count>=2)
+	{
+		pCO->fault_short_count=2;
+		ret = eCOSHORT;
+		SysteSetSig(eEventSigCoErr);
+		ErrFlag = TRUE;
+	}
+
+	return ret;
+}
+
+/**********************************************************************/
+//Description:		PollingCo
+//Parameters:                        									
+//Return:   											
+//Date:  
+//author:		    quanwu.xu
+/**********************************************************************/
+void PollingCo(void *pTxt)
+{
+	uint16_t Temp = (uint16_t)pTxt;
+	switch (Temp)
+	{
+		case eCoCail:
+			SysteSetSig(eEventSigCoCailTimeout);
+			break;
+			
+		case eCoAlarm:
+			SysteSetSig(eEventSigCoAlarmTimeout);
+			break;
+
+		case eCoAlarmInterVal:
+			SysteSetSig(eEventSigCoAlarmIntervalTimeout);
+			break;
+		
+		case eCoErr:
+			SysteSetSig(eEventSigCoErrTimeout);
+			break;
+
+		case eCoDelaySpeak:
+			SysteSetSig(eEventSigCoTestCancel);
+			break;
+
+		default:
+			break;
+	}
+}
+
+#ifdef SUPPORT_SPEAK_FUNCTION
+/**********************************************************************/
+//Description:		SpeakCoAlarmVoice
+//Parameters:											
+//Return:   											
+//Date:  
+//author:		    quanwu.xu
+/**********************************************************************/
+void SpeakCoAlarmVoice(uint8_t Location)
+{
+	if(Location == LocationMsgNoLocation)
+	{
+		SpeakerSendCmd(CMD_CO_ALARM_NO_LOCATION);
+	}
+	else
+	{
+		SpeakerSendCmd(((uint32_t)CMD_CO_ALARM_IN<<16)|(Location<<8)|CMD_CO_ALARM_MOVE_TO_OUTSIDE);
+	}
+}
+
+#endif
+
+/**********************************************************************/
+//Description:		CoCali
+//Parameters:											
+//Return:   											
+//Date:  
+//author:		    quanwu.xu
+/**********************************************************************/
+void CoCaliMain(void)
+{
+	static uint8 Delay_Cnt=0;
+	static uint16_t CailCoVolValue = 0;
+	uint16_t BatVol = 0;
+	uint32_t temp_offset=0;
+	uint32_t temp_slope=0;
+	uint16_t ppm=0,Co_Adc=0, CoAdcVoltage = 0;
+	CailResult Result = CailSuccess;
+
+	switch(SysAO.sig)
+	{
+		case eEventSigEnteryMode:
+			Delay_Cnt=0;
+			CailCoVolValue = 0;
+
+			if(LoadCOData() == FALSE)
+			{
+				printf("Start Cail Co\n");
+				
+				SysAO.TempData = GetTempIndex();
+				
+				TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(5000), (void *)eCoCail);
+				BatVol = BatteryCheckHandle();
+#ifdef TEMPCALIOLD
+				if(SysAO.TempData<38||SysAO.TempData>55)
+#else
+				if(SysAO.TempData<5||SysAO.TempData>13)
+#endif
+				{
+					while(1)
+					{
+						printf("temp err=%d\n", SysAO.TempData);
+						CailRes(CailFail, eCail_Temp_Err);
+					}
+				}
+				else if((BatVol < CAIL_BAT_LEVEL_MIX) || (BatVol > CAIL_BAT_LEVEL_MAX))
+				{
+					while(1)
+					{
+						printf("bat err=%dmV\n", BatVol);
+						CailRes(CailFail, eCail_BatErr);
+					}
+				}
+				E2promWrite(FLASH_ADDR_CARIBRATION_VDD_MSB, BatVol >> 8);  
+				E2promWrite(FLASH_ADDR_CARIBRATION_VDD_LSB, BatVol & 0xff);  
+			}
+			else
+			{
+				PowerOnWelcomeAndDisplay();
+
+				SysAO.eMode = NormalMode;
+			}
+			break;
+
+		case eEventSigCoCailTimeout:
+			Co_Adc = GetAdcSample(eAdcCoChannel, FALSE);
+
+			CoAdcVoltage = GetVol(PwrAO.BatVolVdd, Co_Adc);
+
+#ifdef SUPPORT_CARIBRATION_DEBUG 
+			printf("Step=%d  ",COAO.CoCariStep);
+			printf("Cnt=%d\n", Delay_Cnt);
+			printf("Vol=%dmV\n",CoAdcVoltage);
+#endif
+
+			Delay_Cnt++;
+			if(COAO.CoCariStep==2)//AQ	Step 2 Caribration 150 PPM
+			{
+				CailStepDisplay(eCail_Co_Step2);
+				if(Delay_Cnt>CAIL_CO_WAIT_TIME)
+				{
+					CailCoVolValue+=CoAdcVoltage;
+					if(Delay_Cnt>=(CAIL_CO_WAIT_TIME+SAMPLE_CO_TIME_CNT))
+					{
+						Delay_Cnt=0;
+						CailCoVolValue>>=4;
+		
+						// 150ppm offset valu  e when in temperature T
+						temp_offset = ((uint32_t)COAO.CoOffset)*co_temp_offset_rate[SysAO.TempData]/1000;
+						// 150ppm slope value when in temperature T
+						temp_slope = (CailCoVolValue - (uint16_t)temp_offset)/15; 	// 10ppm
+						// 150ppm slope value when in temperature 20C
+						COAO.ppm_caribration_slope = (uint16_t)(temp_slope*1000/co_temp_slope_rate[SysAO.TempData]); 
+		
+						if((COAO.ppm_caribration_slope>PPM_CARIBRATON_STEP1_THRESHOLD_MIN)&&
+									(COAO.ppm_caribration_slope<PPM_CARIBRATON_STEP1_THRESHOLD_MAX))		   //step1 success
+						{
+							E2promWrite(FLASH_ADDR_CARIBRATION_PPM_SLOPE_MSB,  COAO.ppm_caribration_slope>>8);	
+							E2promWrite(FLASH_ADDR_CARIBRATION_PPM_SLOPE_LSB, COAO.ppm_caribration_slope&0xff);  
+							E2promWrite(FLASH_ADDR_CARIBRATION_STEP, COAO.CoCariStep);		//step2
+							E2promWrite(FLASH_ADDR_CARIBRATION_150_TEMPERATURE, SysAO.TempData);
+
+							Result = CailSuccess;
+						}
+						else					   //step1 fail
+						{
+							Result = CailFail;
+						}
+
+						while(1)
+						{
+#ifdef SUPPORT_CARIBRATION_DEBUG
+							printf("T=%d, ", (SysAO.TempData-20));
+							printf("k=%d\n",COAO.ppm_caribration_slope);
+#endif
+							CailRes(Result, eCail_Co_Step2);
+						}
+					}
+				}
+			}
+			else if(COAO.CoCariStep==3)//Step 3 Caribration 400 PPM
+			{
+				CailStepDisplay(eCail_Co_Step3);
+				if(Delay_Cnt>CAIL_CO_WAIT_TIME)//13??*30S==390S
+				{
+					CailCoVolValue+=CoAdcVoltage;
+					if(Delay_Cnt>=(CAIL_CO_WAIT_TIME+SAMPLE_CO_TIME_CNT))
+					{
+						Delay_Cnt=0;
+						CailCoVolValue>>=4;
+						ppm = CoGetPpm(CailCoVolValue, SysAO.TempData);
+		
+#if defined SUPPORT_UL2034_UL217          // 400ppm
+						if((ppm>=320)&&(ppm<=480))		  //-15% - +15% 		//step2 sucess
+#elif defined SUPPORT_EN50291_EN14604     // 300ppm
+						if((ppm>=240)&&(ppm<=360))		  //-15% - +15%
+#endif
+						{
+							E2promWrite(FLASH_ADDR_CO_CARIBRATION_FLAG, CO_CARIBRATION_FLAG);
+							E2promWrite(FLASH_ADDR_CARIBRATION_STEP, 0x00);    //clear step
+
+							Result = CailSuccess;
+						}
+						else							//step1 fail
+						{
+							Result = CailFail;
+						}
+
+						while(1)
+						{
+#ifdef SUPPORT_CARIBRATION_DEBUG
+							printf("T=%d, ", (SysAO.TempData-20));
+							printf("COAO.ppm=%d\n",ppm);
+#endif
+							CailRes(Result, eCail_Co_Step3);
+						}
+					}
+				}
+			}
+			else //Step 0 Caribration 0 PPM
+			{
+				CailStepDisplay(eCail_Co_Step1);
+				if(Delay_Cnt>CAIL_CO_WAIT_TIME)
+				{
+					CailCoVolValue+=CoAdcVoltage;
+					if(Delay_Cnt>=(CAIL_CO_WAIT_TIME+SAMPLE_CO_TIME_CNT))
+					{
+						Delay_Cnt=0;
+						CailCoVolValue >>=4;	
+						COAO.ppm_caribration_offset = (uint16_t)((uint32_t)CailCoVolValue*1000/co_temp_offset_rate[SysAO.TempData]);
+
+						if((COAO.ppm_caribration_offset>PPM_CARIBRATON_STEP0_THRESHOLD_MIN)&&(COAO.ppm_caribration_offset<PPM_CARIBRATON_STEP0_THRESHOLD_MAX))		   //step0 success
+						{
+							E2promWrite(FLASH_ADDR_CARIBRATION_PPM_OFFSET_MSB, COAO.ppm_caribration_offset>>8);
+							E2promWrite(FLASH_ADDR_CARIBRATION_PPM_OFFSET_LSB, COAO.ppm_caribration_offset&0xff);
+							E2promWrite(FLASH_ADDR_CARIBRATION_0_TEMPERATURE, SysAO.TempData);
+							E2promWrite(FLASH_ADDR_CARIBRATION_STEP, COAO.CoCariStep);		  //step1
+
+							Result = CailSuccess;
+						}
+						else					   //step1 fail
+						{
+							Result = CailFail;
+						}
+
+						while(1)
+						{
+#ifdef SUPPORT_CARIBRATION_DEBUG
+							printf("T=%d, ", (SysAO.TempData-20));
+							printf("b=%d\n", COAO.ppm_caribration_offset);
+#endif
+							CailRes(Result, eCail_Co_Step1);
+						}
+					}
+				}
+			}
+			break;
+
+		default:
+			break;
+	}
+}
+
+
+/**********************************************************************/
+//Description:		CoTestMain
+//Parameters:                        									
+//Return:   											
+//Date:  
+//author:		    quanwu.xu
+/**********************************************************************/
+void CoTestMain(void)
+{
+#ifdef SUPPORT_CO_FUNCTION
+	uint8_t Ret = 0;
+#endif
+	static uint8_t TimeoutCnt = 0;
+	static uint8_t IntervalTimeoutCnt = 0;
+
+	switch(SysAO.sig)
+	{
+		case eEventSigEnteryMode:
+#ifdef SUPPORT_CO_DEBUG 
+			printf("Co Test\n");
+#endif
+			TimeoutCnt = 0;
+			IntervalTimeoutCnt = 0;
+
+#ifdef SUPPORT_SPEAK_FUNCTION
+			SpeakerSendCmd(CMD_TEST_CO);
+#endif
+
+#ifdef SUPPORT_CO_FUNCTION
+			Ret=COSelfCheck(&COAO);
+			if(eCOErr==Ret)	//CO ERROR
+			{
+				SysAO.eMode = CoErrMode;
+			}
+			else
+#endif
+			{
+				TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(100), (void *)eCoAlarm);
+			}
+			
+			break;
+
+		case eEventSigCoAlarmTimeout:
+			if(++TimeoutCnt > 7)
+			{
+				TimeoutCnt = 0;
+				R_LED_OFF();
+				BEEP_OFF();
+
+				TmrDeleteTimer(eTmrHdlCo);
+				if(++IntervalTimeoutCnt > 1)
+				{
+					IntervalTimeoutCnt = 0;
+					SysteSetSig(eEventSigCoTestCancel);
+				}
+				else
+				{
+#ifdef SUPPORT_SPEAK_FUNCTION
+					TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(1000), (void *)eCoDelaySpeak);
+#else
+					TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(5000), (void *)eCoAlarmInterVal);
+#endif
+				}
+			}
+			else
+			{
+				R_LED_TOGGLE();
+				BEEP_TOGGLE();
+			}
+			break;
+
+		case eEventSigCoAlarmIntervalTimeout:
+			TmrDeleteTimer(eTmrHdlCo);
+			TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(100), (void *)eCoAlarm);
+			break;
+
+		case eEventSigCoTestCancel:
+			TmrDeleteTimer(eTmrHdlCo);
+#ifdef SUPPORT_SPEAK_FUNCTION
+			if((SysAO.eEventFlg & eEventFlagLowBat) || (SysAO.eEventFlg & eEventFlagLowBatForbitMute) 
+															|| (SysAO.eEventFlg & eEventFlagLowBatMute))
+			{
+				SpeakerSendCmd((CMD_TEST_FINISHED<<8)|CMD_REPLACE_BAT_LOW_BAT);
+			}
+			else
+			{
+				SpeakerSendCmd((CMD_TEST_FINISHED<<8)|CMD_NORMAL_WORKING_STATUS);
+			}
+#endif
+
+#ifdef SUPPORT_RF_NET_FUNCTION
+			if(GetRfPairedMode() ==  ePairedHub)
+			{
+				UartSendMsg(eUartMsgFireAlarm, UartFirmAlarmMsgTest, DevTestSuccess);
+			}
+#endif
+			SysAO.eMode = NormalMode;
+			break;
+			
+		case eEventSigKey1Clik:
+#ifdef SUPPORT_SPEAK_FUNCTION
+			R_LED_OFF();
+			BEEP_OFF();
+			SpeakerSendCmd(CMD_TEST_CANCELLED);
+			TmrDeleteTimer(eTmrHdlCo);
+			SysAO.eMode = NormalMode;
+#endif
+			break;
+
+		default:
+			break;
+	}
+}
+
+/**********************************************************************/
+//Description:		CoAlarmMain
+//Parameters:                        								
+//Return:   											
+//Date:  
+//author:			quanwu.xu
+/**********************************************************************/
+void CoAlarmMain(void)
+{
+	uint8_t i = 0;
+	static uint8_t TimeoutCnt = 0;
+	static uint8_t CheckCotimeCnt = 0;
+
+	switch(SysAO.sig)
+	{
+		case eEventSigEnteryMode:
+			printf("Co Alarm Mode\n");
+
+			TimeoutCnt = 0;
+			CheckCotimeCnt = 0;
+			
+#ifdef SUPPORT_RF_NET_FUNCTION
+			UartSendMsg(eUartMsgFireAlarm, UartFirmAlarmMsgCoAlarm, RfAO.TxLocation);
+#endif
+
+			TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(100), (void *)eCoAlarm);
+			break;
+
+		case eEventSigCoAlarmTimeout:
+			if(++TimeoutCnt > 7)
+			{
+				TimeoutCnt = 0;
+				R_LED_OFF();
+				BEEP_OFF();
+
+				TmrDeleteTimer(eTmrHdlCo);
+				TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(5000), (void *)eCoAlarmInterVal);
+#ifdef SUPPORT_SPEAK_FUNCTION
+				SpeakCoAlarmVoice(RfAO.TxLocation);
+#endif
+			}
+			else
+			{
+				R_LED_TOGGLE();
+				BEEP_TOGGLE();
+			}
+			break;
+
+		case eEventSigCoAlarmIntervalTimeout:
+			BatteryCheckHandle();
+			SmokeAlarmCheck();
+			if(CheckCotimeCnt++ > 4)
+			{
+				CheckCotimeCnt = 0;
+				CoAlarmCheck();
+			}
+
+			TmrDeleteTimer(eTmrHdlCo);
+			TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(100), (void *)eCoAlarm);
+			break;
+
+		case eEventSigKey1Clik:
+			R_LED_OFF();
+			BEEP_OFF();
+#ifdef SUPPORT_EN50291_EN14604
+			if(CoAlarmCheck() < 240)				//EN, <300 can be Muted  %15
+			{
+				TmrDeleteTimer(eTmrHdlCo);
+				SysAO.eMode = CoMuteMode;
+			}
+#elif defined(SUPPORT_UL2034_UL217)
+			TmrDeleteTimer(eTmrHdlCo);
+			SysAO.eMode = CoMuteMode;
+#endif
+			break;
+
+		case eEventSigSmokeAlarm:
+			R_LED_OFF();
+			BEEP_OFF();
+			SysAO.eMode = SmokeAlarmMode;
+			TmrDeleteTimer(eTmrHdlCo);
+			break;
+
+		case eEventSigCoAlarmCancel:
+			R_LED_OFF();
+			BEEP_OFF();
+			SysAO.eMode = NormalMode;
+			TmrDeleteTimer(eTmrHdlCo);
+#ifdef SUPPORT_RF_NET_FUNCTION
+			UartSendMsg(eUartMsgFireAlarm, UartFirmAlarmMsgCancelAlarm, 0);
+#endif
+
+#ifdef SUPPORT_SPEAK_FUNCTION
+			SpeakerSendCmd(CMD_CANCEL_ALARM);
+#endif
+
+			for(i = 0; i<5; i++)
+			{
+				G_LED_ON();
+				GCC_DELAY(250000);
+				GCC_DELAY(250000);
+				G_LED_OFF();
+				GCC_DELAY(250000);
+				GCC_DELAY(250000);
+			}
+			break;
+
+		default:
+			break;
+				
+	}
+}
+
+
+/**********************************************************************/
+//Description:		CoMuteMain
+//Parameters:                        								
+//Return:   											
+//Date:  
+//author:			quanwu.xu
+/**********************************************************************/
+void CoMuteMain(void)
+{
+	uint8_t i = 0;
+	uint16 PPM=0;
+	static uint8_t TimeoutCnt = 0;
+	static uint16_t MuteTimeCnt = 0;
+
+	switch(SysAO.sig)
+	{
+		case eEventSigEnteryMode:
+			printf("Co Mute Mode\n");
+			TimeoutCnt = 0;
+			MuteTimeCnt = 0;
+
+#ifdef SUPPORT_SPEAK_FUNCTION
+			SpeakerSendCmd(CMD_CO_ALARM_MUTED);
+#endif
+
+#ifdef SUPPORT_RF_NET_FUNCTION
+			UartSendMsg(eUartMsgFireAlarm, UartFirmAlarmMsgMute, 0);
+#endif
+
+			TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(100), (void *)eCoAlarm);
+			TmrInsertTimer(eTmrHdlMuteTimeout, TMR_PERIOD(60000), (void *)CoMuteMode);
+			break;
+		
+		case eEventSigKey1Clik:
+			break;
+
+		case eEventSigCoAlarmTimeout:
+			if(++TimeoutCnt > 7)
+			{
+				TimeoutCnt = 0;
+				R_LED_OFF();
+
+				BatteryCheckHandle();
+				SmokeAlarmCheck();
+
+				TmrDeleteTimer(eTmrHdlCo);
+				TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(5000), (void *)eCoAlarmInterVal);
+			}
+			else
+			{
+				R_LED_TOGGLE();
+			}
+			break;
+
+		case eEventSigCoAlarmIntervalTimeout:
+			TmrDeleteTimer(eTmrHdlCo);
+			TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(100), (void *)eCoAlarm);
+			break;
+
+		case eEventSigCoAlarm:
+#ifdef SUPPORT_SPEAK_FUNCTION
+			SpeakerSendCmd(CMD_CO_ALARM_CANNOT_MUTED);
+#endif
+			SysAO.eMode = CoAlarmMode;
+			TmrDeleteTimer(eTmrHdlCo);
+			TmrDeleteTimer(eTmrHdlMuteTimeout);
+			break;
+
+		case eEventSigSmokeAlarm:
+			SysAO.eMode = SmokeAlarmMode;
+			TmrDeleteTimer(eTmrHdlCo);
+			TmrDeleteTimer(eTmrHdlMuteTimeout);
+			break;
+#ifdef SUPPORT_RF_NET_FUNCTION
+		case eEventSigRadioSmokeAlarm:
+			SysAO.eMode = RadioSmokeAlarmMode;
+			TmrDeleteTimer(eTmrHdlCo);
+			TmrDeleteTimer(eTmrHdlMuteTimeout);
+			break;
+
+		case eEventSigRadioCoAlarm:
+			SysAO.eMode = RadioCoAlarmMode;
+			TmrDeleteTimer(eTmrHdlCo);
+			TmrDeleteTimer(eTmrHdlMuteTimeout);
+			break;
+#endif
+		case eEventSigCoMuteTimeout:
+			R_LED_OFF();
+			MuteTimeCnt++;
+			if(MuteTimeCnt >= CO_MUTE_TIMEOUT_COUNT)			//last for 9min
+			{
+				SysteSetSig(eEventSigCoMuteFinished);
+			}
+			else if(MuteTimeCnt == CO_MUTE_TIMEOUT_ReCheck)		//after 5min Check PPM,if PPM>30PPM Alarming
+			{
+				PPM=CoAlarmCheck();
+				
+				if(PPM > COPPMLEVEL0)
+				{
+					SysteSetSig(eEventSigCoAlarm);
+				}
+			}
+			break;
+
+		case eEventSigCoMuteFinished:
+			SysAO.eMode = NormalMode;
+			TmrDeleteTimer(eTmrHdlCo);
+			TmrDeleteTimer(eTmrHdlMuteTimeout);
+#ifdef SUPPORT_SPEAK_FUNCTION
+			SpeakerSendCmd(CMD_CANCEL_ALARM);
+#endif
+
+#ifdef SUPPORT_RF_NET_FUNCTION
+			if(GetRfPairedMode() == ePairedHub)
+			{
+				UartSendMsg(eUartMsgFireAlarm, UartFirmAlarmMsgCancelAlarm, 0);
+			}
+#endif
+			for(i = 0; i<3; i++)
+			{
+				G_LED_ON();
+				GCC_DELAY(250000);
+				GCC_DELAY(250000);
+				G_LED_OFF();
+				GCC_DELAY(250000);
+				GCC_DELAY(250000);
+			}
+			break;
+
+		default:
+			break;
+				
+	}	
+}
+
+/**********************************************************************/
+//Description:		CoErrMain
+//Parameters:                        								
+//Return:   											
+//Date:  
+//author:			quanwu.xu
+/**********************************************************************/
+void CoErrMain(void)
+{
+	static uint8_t CheckTimeCnt = 0;
+#ifdef SUPPORT_SPEAK_FUNCTION
+	static uint8_t CoErrSpeakTimeCnt = 0;
+#endif
+
+	switch(SysAO.sig)
+	{
+		case eEventSigEnteryMode:
+			CheckTimeCnt = 0;
+#ifdef SUPPORT_SPEAK_FUNCTION
+			CoErrSpeakTimeCnt = 0;
+#endif
+		case eEventSigKey1Clik:
+			printf("Co Err Mode\n");
+#ifdef SUPPORT_SPEAK_FUNCTION
+			SpeakerSendCmd(CMD_CO_SENSOR_ERR);
+#endif
+
+#ifdef SUPPORT_RF_NET_FUNCTION  //reserved
+			if(GetRfPairedMode() == ePairedHub)
+			{
+				UartSendMsg(eUartMsgFireAlarm, UartFirmAlarmMsgFault, DevSmokeSenorFault);
+			}
+#endif
+			ErrIndex(1,1,2);
+			break;
+
+		case eEventSigWakeup:
+			COSelfCheck(&COAO);
+			if(++CheckTimeCnt>5)
+			{
+#ifdef SUPPORT_SPEAK_FUNCTION
+				if(CoErrSpeakTimeCnt < 15)
+				{
+					CoErrSpeakTimeCnt++;
+					SpeakerSendCmd(CMD_CO_SENSOR_ERR);
+				}
+#endif
+				CheckTimeCnt = 0;
+				ErrIndex(1,1,2);
+			}
+			break;
+
+		case eEventSigCoErrRecovery:
+#ifdef SUPPORT_RF_NET_FUNCTION
+			if(GetRfPairedMode() == ePairedHub)
+			{
+				UartSendMsg(eUartMsgFireAlarm, UartFirmAlarmMsgFault, DevFaultCancel);
+			}
+#endif
+			SysAO.eMode = NormalMode;
+			break;
+		
+		default:
+			break;
+	}
+}
+
+#ifdef SUPPORT_RF_NET_FUNCTION
+/**********************************************************************/
+//Description:		NetTestMain
+//Parameters:                        								
+//Return:   											
+//Date:  
+//author:			quanwu.xu
+/**********************************************************************/
+void RfCoAlarmMain(void)
+{
+	static uint8_t TimeoutCnt = 0;
+
+	switch(SysAO.sig)
+	{
+		case eEventSigEnteryMode:
+			TimeoutCnt = 0;
+			TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(100), (void *)eCoAlarm);
+			break;
+
+		case eEventSigCoAlarmTimeout:
+			if(++TimeoutCnt > 7)
+			{
+				if(TimeoutCnt>8)
+				{
+					TimeoutCnt = 0;
+
+					CoAlarmCheck();
+					SmokeAlarmCheck();
+
+					TmrDeleteTimer(eTmrHdlCo);
+					TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(5000), (void *)eCoAlarmInterVal);
+#ifdef SUPPORT_SPEAK_FUNCTION
+					SpeakCoAlarmVoice(RfAO.RxLocation);
+#endif
+				}
+				else
+				{
+					BEEP_OFF();
+					R_LED_OFF();
+					PollingGreenLED(500);
+				}
+			}
+			else
+			{
+				BEEP_TOGGLE();
+				if(TimeoutCnt%2 == 0)
+				{
+					R_LED_OFF();
+				}
+				else
+				{
+					R_LED_ON();
+				}
+			}
+			break;
+
+		case eEventSigCoAlarmIntervalTimeout:
+			TmrDeleteTimer(eTmrHdlCo);
+			TmrInsertTimer(eTmrHdlCo, TMR_PERIOD(100), (void *)eCoAlarm);
+			break;
+
+
+		case eEventSigCoAlarm:
+			R_LED_OFF();
+			G_LED_OFF();
+			BEEP_OFF();
+			TmrDeleteTimer(eTmrHdlCo);
+		#ifdef SUPPORT_SPEAK_FUNCTION
+			RfAO.RxLocation = LocationMsgNoLocation;
+		#endif
+			SysAO.eMode = CoAlarmMode;
+			break;
+
+		case eEventSigSmokeAlarm:
+			R_LED_OFF();
+			G_LED_OFF();
+			BEEP_OFF();
+			TmrDeleteTimer(eTmrHdlCo);
+			
+			#ifdef SUPPORT_SPEAK_FUNCTION
+			RfAO.RxLocation = LocationMsgNoLocation;
+			#endif
+			SysAO.eMode = SmokeAlarmMode;
+			break;
+
+		case eEventSigKey1Clik:
+#ifdef SUPPORT_RF_NET_FUNCTION
+			UartSendMsg(eUartMsgFireAlarm, UartFirmAlarmMsgCancelAlarm, 0);
+#endif
+			
+			break;
+
+		case eEventSigRadioCancelAlarm:
+			R_LED_OFF();
+			G_LED_OFF();
+			BEEP_OFF();
+			TmrDeleteTimer(eTmrHdlCo);
+			#ifdef SUPPORT_SPEAK_FUNCTION
+			RfAO.RxLocation = LocationMsgNoLocation;
+			#endif
+			
+			SysAO.eMode = NormalMode;
+			break;
+
+		default:
+			break;
+	}
+}
+#endif
+

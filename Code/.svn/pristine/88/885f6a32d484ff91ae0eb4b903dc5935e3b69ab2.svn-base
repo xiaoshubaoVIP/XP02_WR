@@ -1,0 +1,143 @@
+#ifndef _CO_H
+#define	_CO_H
+
+#include "main.h"
+
+#define PPM_CARIBRATON_STEP0_SAMPLE_START           (2400)        // 600s/250ms=2400                        
+#define PPM_CARIBRATON_STEP0_SAMPLE_PERIOD          (60)         // 15s/250ms=60 
+#define PPM_CARIBRATON_STEP1_SAMPLE_START           (1200)        // 600s/500ms=1200 
+#define PPM_CARIBRATON_STEP1_SAMPLE_PERIOD          (30)         // 15s/500ms=30          
+#define PPM_CARIBRATON_STEP2_SAMPLE_START           (600)        // 600s/1s=600
+#define PPM_CARIBRATON_STEP2_SAMPLE_PERIOD          (15)         // 15s/1s=15
+
+
+//co alarm set
+#if defined SUPPORT_UL2034_UL217
+#define CO_ALARM_400PPM_CONCENTRATION       320//400
+#define CO_ALARM_150PPM_CONCENTRATION       120//150
+#define CO_ALARM_70PPM_CONCENTRATION        52//70
+
+#define CO_ALARM_70PPM_TIME        			(120)        // 120min    (60-240)
+#define CO_ALARM_150PPM_TIME       			(25)         // 20min    (10-50)
+#define CO_ALARM_400PPM_TIME       			(6)          // 6min     (4-15)
+#elif defined SUPPORT_EN50291_EN14604
+#define CO_ALARM_300PPM_CONCENTRATION       210//300
+#define CO_ALARM_100PPM_CONCENTRATION       70//100
+#define CO_ALARM_50PPM_CONCENTRATION         40//50
+#define CO_ALARM_30PPM_CONCENTRATION         24//30
+#define CO_ALARM_30PPM_TIME        (150)         // 150min    (>120)
+#define CO_ALARM_50PPM_TIME        (70)          // 70min     (60-90)
+#define CO_ALARM_100PPM_TIME       (20)          // 20min     (10-40)
+#define CO_ALARM_300PPM_TIME       (1)           // 1min      (<3)
+#endif
+
+#define Co_Check_Time					(3)
+#define CO_CHECK_COUNT                  (3)                     // 30s/SLEEP_TIME=6
+#define SLEEP_TIME                      (10)                     // 10s
+
+#define SENSOR_OPEN_FAULT_SAMPLE                    1600 //2184//1.6V //2951   //1.8v
+#define SENSOR_OPEN_SAMPLE                          500  //682//500mV // 984	//600mv
+#define SENSOR_SHORT_SAMPLE_MAX                     2000 //2730//2.0V //3606	//    //2.2v
+#define SENSOR_SHORT_SAMPLE_MIN                     1000 //1365//1.0V //1640	//    //1.0v
+	
+#define PPM_CARIBRATON_STEP0_THRESHOLD_MIN          136      	// 100mv
+#define PPM_CARIBRATON_STEP0_THRESHOLD_MAX          341      	// 250mv
+
+#define PPM_CARIBRATON_STEP1_THRESHOLD_MAX          78			//4.6mV
+#define PPM_CARIBRATON_STEP1_THRESHOLD_MIN          25			//3.0mV
+
+
+#if defined SUPPORT_UL2034_UL217
+#define COPPMLEVEL   (0)
+#define COPPMLEVEL0  (50)
+#define COPPMLEVEL1  (100)
+#define COPPMLEVEL2  (310)
+#define COPPMLEVEL3  (5000)
+#elif defined SUPPORT_EN50291_EN14604
+#define COPPMLEVEL   (0)
+#define COPPMLEVEL0  (24)
+#define COPPMLEVEL1  (40)
+#define COPPMLEVEL2  (70)
+#define COPPMLEVEL3  (210)
+#define COPPMLEVEL4  (4500)
+#endif
+#define CO_Alarm_TimeOut		42// 4min=(4*60)/5.7=42
+
+
+
+typedef enum{
+	eCONO = 0,
+	eCOed,// co alarm
+	eCOErr,
+	eCOOPEN,
+	eCOSHORT,
+	
+}eCOState;
+
+
+
+typedef struct CoObject CoObjectTag;
+struct CoObject{
+		//Caribration
+		uint8  CoCariFlag;
+		uint16 CoAvg;
+		uint8  CoCariStep;
+		uint16 CoSlope;
+		uint16 CoOffset;
+		int8   TempData_0PPM;
+		int8   TempData_150PPM;
+
+		uint8_t ppm_caribration_step;
+		uint8_t ppm_caribration_flag;
+
+		//Alarm Check
+		uint16_t COAlarmThreshold0; //	
+		uint16_t COAlarmThreshold1; //	
+		uint16_t COAlarmThreshold2; //
+		uint16_t COAlarmThreshold3; //	
+		uint16_t COAlarmThreshold4; //
+
+		uint16_t ppm_caribration_slope;
+		uint16_t ppm_caribration_offset;
+		uint8 fault_short_count;
+		uint8 fault_open_count;
+};
+extern CoObjectTag COAO;
+								
+#define CO_DETECT_FAULT_PORT                _pc
+#define CO_DETECT_FAULT_PIN                 1<<1
+#define CO_DETECT_FAULT_ON()                GpioSetBits(CO_DETECT_FAULT_PORT,CO_DETECT_FAULT_PIN)   
+#define CO_DETECT_FAULT_OFF()               GpioResetBits(CO_DETECT_FAULT_PORT,CO_DETECT_FAULT_PIN)
+
+//display set
+#define DISPLAY_CO_PPM               30         // display co ppm when higher than 30ppm
+#define CO_PPM_MAX                   999
+
+#define CO_Self_CHECK_COUNT			6
+
+#define CO_MUTE_TIMEOUT_ReCheck     5
+
+#define CO_MUTE_TIMEOUT_COUNT       9
+
+
+
+
+#define CO_Alarm_TimeOut1      5700
+#define CO_Alarm_TimeOut2      60000
+
+
+
+eCOState COSelfCheck(CoObjectTag *pCO);
+uint16_t CoAlarmCheck(void);
+
+bool LoadCOData(void);
+void InitCO_Data(void);
+void CoCaliMain(void);
+void CoTestMain(void);
+void CoErrMain(void);
+void CoAlarmMain(void);
+void CoMuteMain(void);
+void RfCoAlarmMain(void);
+#endif
+
+

@@ -1,0 +1,45 @@
+/*************************************************************************
+* Copyright (c) 2018 Shenzhen Xiaojun technology co., Ltd.All right reserved.
+* Author: chaofa.yan
+* Date: 2018/07/04
+* History Information
+* Author 		Date 		Description
+* chaofa.yan	2018/07/04 	Created the file
+*************************************************************************/
+
+#ifndef __KEY_ANALYSIS_H__
+#define __KEY_ANALYSIS_H__
+
+#include "base.h"
+#include "Polling.h"
+
+typedef enum _eKeyName
+{
+	eKeyMaxMin,
+	eKeyPair,
+	eKeySensor,
+	eKeyLight,
+	eKeyNameMax,
+}eKeyName;
+
+typedef enum _eKeyStatus
+{
+	eKeyStatRelease,
+	eKeyStatNewKey,	
+	eKeyStatContinuedKey,
+	eKeyStatAnotherKey,	
+	eKeyStatMax,
+}eKeyStat;
+
+typedef struct _KeyInfo
+{
+	uint8_t KeyName; //eKeyName KeyName
+	uint8_t KeyStat; //eKeyStat KeyStat
+	uint16_t Counter;
+}KeyInfo;
+
+extern KeyInfo GetAndCleanSysKeyInfo(void);
+extern eKeyName GetKey(void);
+
+#endif
+

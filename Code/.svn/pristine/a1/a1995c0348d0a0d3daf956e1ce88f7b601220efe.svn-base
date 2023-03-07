@@ -1,0 +1,194 @@
+/*************************************************************************
+* Copyright (c) 2018 Shenzhen Xiaojun technology co., Ltd.All right reserved.
+* Author: chaofa.yan
+* Date: 2018/04/25
+* History Information
+* Author 		Date 		Description
+* chaofa.yan	2018/04/25 	Created the file
+*************************************************************************/
+#include "Polling.h"
+#include "main.h"
+#include "RF.h"
+#include "Co.h"
+#include "Smoke.h"
+
+
+static TmrInfo TimerInfo[eTmrHdlMax];
+
+void TmrInitHeader(void)
+{
+	uint8_t i = eTmrHdlMax;
+	TmrInfo* pTmrInfo = &TimerInfo[0];
+	while(i > 0)
+	{
+		CLEAN_TMR_FLAG(pTmrInfo->TimerFlag, eTmrActitvityFlag);
+		CLEAN_TMR_FLAG(pTmrInfo->TimerFlag, eTmrTimeOutFlag);
+		pTmrInfo->CurCnt = 0;
+		pTmrInfo->ReloadCnt = 0;
+		pTmrInfo->pCtx = NULL;
+		i--;
+		pTmrInfo++;
+	}
+}
+
+
+void TmrInsertTimer(eTmrHdl eHandle, TmrCnt ReloadCnt, void* pCtx)
+{
+	TmrInfo* pTmrInfo = NULL;	
+	if(eHandle < eTmrHdlMax)
+	{
+		pTmrInfo = &TimerInfo[eHandle];
+		SET_TMR_FLAG(pTmrInfo->TimerFlag, eTmrActitvityFlag);
+		pTmrInfo->CurCnt = ReloadCnt;
+		pTmrInfo->ReloadCnt = ReloadCnt;
+		pTmrInfo->pCtx = pCtx;
+		SetHaltFlag((uint32_t)1<<eHandle);
+	}
+}
+
+void TmrDeleteTimer(eTmrHdl eHandle)
+{
+	TmrInfo* pTmrInfo = NULL;
+	
+	if(eHandle < eTmrHdlMax)
+	{
+		pTmrInfo = &TimerInfo[eHandle];
+		CLEAN_TMR_FLAG(pTmrInfo->TimerFlag, eTmrActitvityFlag);
+		CLEAN_TMR_FLAG(pTmrInfo->TimerFlag, eTmrTimeOutFlag);
+		pTmrInfo->CurCnt = 0;
+		pTmrInfo->ReloadCnt = 0;
+		pTmrInfo->pCtx = NULL;
+		ClearHaltFlag((uint32_t)1<<eHandle);
+	}
+}
+
+void Polling(void)
+{
+
+#if 0
+	uint32_t Ticks = 0;
+	uint8_t i = eTmrHdlMax;
+	TmrInfo* pTmrInfo = &TimerInfo[0];
+
+	Ticks = GetTicks();
+
+	if(Ticks > 0)
+	{
+		while(i > 0)
+		{
+			if(pTmrInfo->TimerFlag & eTmrActitvityFlag)
+			{
+				if(pTmrInfo->CurCnt > Ticks)
+				{
+					pTmrInfo->CurCnt -= Ticks;
+				}
+				else
+				{
+					pTmrInfo->CurCnt = pTmrInfo->ReloadCnt;
+					SET_TMR_FLAG(pTmrInfo->TimerFlag, eTmrTimeOutFlag);
+				}
+			}			
+			i--;
+			pTmrInfo++;
+		}
+
+		if(TimerInfo[eTmrHdlKeyScan].TimerFlag & eTmrTimeOutFlag)
+		{
+			CLEAN_TMR_FLAG(TimerInfo[eTmrHdlKeyScan].TimerFlag, eTmrTimeOutFlag);
+			PollingKeyScan();
+		}
+
+		if(TimerInfo[eTmrHdlKeyDouble].TimerFlag & eTmrTimeOutFlag)
+		{
+			CLEAN_TMR_FLAG(TimerInfo[eTmrHdlKeyDouble].TimerFlag, eTmrTimeOutFlag);
+			PollingDoubleClickScan();
+		}
+		
+		if(TimerInfo[eTmrHdlLedOff].TimerFlag & eTmrTimeOutFlag)
+		{
+			CLEAN_TMR_FLAG(TimerInfo[eTmrHdlLedOff].TimerFlag, eTmrTimeOutFlag);
+			TmrDeleteTimer(eTmrHdlLedOff);
+			PollingLEDOff();			
+		}
+		
+		if(TimerInfo[eTmrHdlBeepOff].TimerFlag & eTmrTimeOutFlag)		{
+			CLEAN_TMR_FLAG(TimerInfo[eTmrHdlBeepOff].TimerFlag, eTmrTimeOutFlag);
+			TmrDeleteTimer(eTmrHdlBeepOff);
+			PollingBeepOff();			
+		}
+
+		if(TimerInfo[eTmrHdlSmoke].TimerFlag & eTmrTimeOutFlag)
+		{
+			CLEAN_TMR_FLAG(TimerInfo[eTmrHdlSmoke].TimerFlag, eTmrTimeOutFlag);
+			PollingSmoke(TimerInfo[eTmrHdlSmoke].pCtx);
+		}
+
+		if(TimerInfo[eTmrHdlCo].TimerFlag & eTmrTimeOutFlag)
+		{
+			CLEAN_TMR_FLAG(TimerInfo[eTmrHdlCo].TimerFlag, eTmrTimeOutFlag);
+			PollingCo(TimerInfo[eTmrHdlCo].pCtx);
+		}
+
+
+#ifdef SUPPORT_RF_NET_FUNCTION
+		if(TimerInfo[eTmrHdlRFLed].TimerFlag & eTmrTimeOutFlag) 	{
+			CLEAN_TMR_FLAG(TimerInfo[eTmrHdlRFLed].TimerFlag, eTmrTimeOutFlag);
+			RFLedFlash(TimerInfo[eTmrHdlRFLed].pCtx);
+		}
+
+		if(TimerInfo[eTmrHdlRFTimeout].TimerFlag & eTmrTimeOutFlag) 	{
+			CLEAN_TMR_FLAG(TimerInfo[eTmrHdlRFTimeout].TimerFlag, eTmrTimeOutFlag);
+			PollingRfTimeout();
+		}
+
+		if(TimerInfo[eTmrHdlUartSendTimeout].TimerFlag & eTmrTimeOutFlag){
+			CLEAN_TMR_FLAG(TimerInfo[eTmrHdlUartSendTimeout].TimerFlag, eTmrTimeOutFlag);
+			//TimerInfo[eTmrHdlUartSendTimeout].pCtx = (void *)((uint16_t)(TimerInfo[eTmrHdlUartSendTimeout].pCtx) + 1);
+			PollingUartSendTimeout((void *)((uint16_t)(TimerInfo[eTmrHdlUartSendTimeout].pCtx)++));
+		}
+
+		if(TimerInfo[eTmrHdlRFSmokeAlarm].TimerFlag & eTmrTimeOutFlag)		{
+			CLEAN_TMR_FLAG(TimerInfo[eTmrHdlRFSmokeAlarm].TimerFlag, eTmrTimeOutFlag);
+			PollingRfSmokeAlarm();
+		}
+#endif
+	}
+	
+#endif
+}
+#if 0
+void* TmrGetCtx(eTmrHdl eHandle)
+{
+	void* pCtx = NULL;
+	
+	if(eHandle < eTmrHdlMax)
+	{
+		pCtx = TimerInfo[eHandle].pCtx;
+	}
+
+	return (pCtx);
+}
+
+void TmrSetCurCnt(eTmrHdl eHandle, TmrCnt CurCnt)
+{
+	if(eHandle < eTmrHdlMax)
+	{
+		TimerInfo[eHandle].CurCnt = CurCnt;
+	}
+}
+
+void TmrResetCurCnt(eTmrHdl eHandle)
+{
+	if(eHandle < eTmrHdlMax)
+	{
+		TimerInfo[eHandle].CurCnt = TimerInfo[eHandle].ReloadCnt;
+	}
+}
+
+uint32_t TmrGetMbs(void)
+{
+	return (eTmrHdlMax);
+}
+#endif
+
+

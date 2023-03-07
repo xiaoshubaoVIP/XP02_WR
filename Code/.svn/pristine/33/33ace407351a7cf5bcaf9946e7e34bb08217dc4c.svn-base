@@ -1,0 +1,264 @@
+/****************************************************************************/
+/*	File   :             PwrManager.c               */
+/*	Author :                       songjiang                                */
+/*	Version:                          V1.0                                  */
+/*	Date   :                    2019/7/25,16:30:4                         */
+/********************************Modify History******************************/
+/*   yy/mm/dd     F. Lastname    Description of Modification                */
+/****************************************************************************/
+/*	Attention:                                                              */
+/*	CopyRight:                CopyRight 2017--2025                          */
+/*           Shenzhen Xiaojun Technology Co., Ltd.  Allright Reserved        */
+/*	Project :                      SC01                           */
+/****************************************************************************/
+#include "base.h"
+#include "PwrManager.h"
+#include "Module.h"
+#include "main.h"
+#include "Smoke.h"
+PwrTag PwrAO;
+
+const uint16 VolTbl[SAMPLECALINUM]=
+{ 
+	3000,
+	2900,
+	2800,
+	2700, 
+	2600,
+	2500, 
+};
+
+void PwrInit(void)
+{
+	PwrAO.BatCheckCntlow = 0;
+	PwrAO.BatCheckCnt1in3 = 0;
+	PwrAO.BatCheckCnt2in3 = 0;
+	PwrAO.standbycnt = 0;
+
+	PwrAO.CailVddValue = E2promRead(FLASH_ADDR_CARIBRATION_VDD_MSB);
+	PwrAO.CailVddValue <<= 8;
+	PwrAO.CailVddValue |= E2promRead(FLASH_ADDR_CARIBRATION_VDD_LSB);
+}
+/**********************************************************************/
+//Description:		EnteryLowPower										
+//Parameters:                        									
+//Return:   											
+//Date:  
+//author:		    song
+/**********************************************************************/
+void EnteryLowPower(void)
+{
+    // FHIDEN:bit1
+    _fhiden = 0;        // HIRC disable when CPU is switched off
+
+    // FSIDEN:bit0
+    _fsiden = 1;        // LIRC enable when CPU is switched on
+#ifdef SUPPORT_HALT_DEBUG 
+	printf("in, %d\n", SysAO.eEventFlg);
+#endif
+
+	do
+	{
+		_clrwdt();	
+		GCC_HALT();
+
+#ifdef SUPPORT_SPEAK_FUNCTION
+		if(TEST_KEY_is_L() || SET_KEY_is_L())
+#elif defined SUPPORT_XP01_WR_5260
+		if(TEST_KEY_is_L() || PAIR_KEY_is_L())
+#else
+		if(TEST_KEY_is_L())
+#endif
+		{
+			break;
+		}
+
+#ifdef SUPPORT_RF_NET_FUNCTION
+		if(UART_INT_is_L())
+		{
+			PwrAO.standbycnt = LowPwrMaxCnt;
+			GCC_DELAY(2000);
+		}
+#endif
+	}
+	while (PwrAO.standbycnt++<LowPwrMaxCnt);
+	PwrAO.standbycnt = 0;
+
+	if(TEST_KEY_is_H())
+	{
+		SysteSetSig(eEventSigWakeup);
+	}		
+
+#ifdef SUPPORT_HALT_DEBUG 
+	printf("out\n");
+#endif
+}
+
+/**********************************************************************/
+//Description:		GetVddVol														  
+//Parameters:        voltage referance                												  
+//Return:   											
+//Date:  
+//author:		    song.jiang
+/**********************************************************************/
+uint16 GetVddVol(uint16 VbgRef)
+{
+    uint16 CurrVolt;
+    uint32 CalTmp;
+//----------------------------------------                      //VDD/4096 = Vref/Vref(adc)
+    CalTmp = 1200;                                              // VBGREF = 1.2V
+    CalTmp <<= 12;                                              // VBGREF * 2^n
+    CurrVolt = CalTmp / VbgRef;                                 //Curr_Volt = VBGREF * 2^n / VbgRef
+
+    return CurrVolt;
+}
+
+uint8 GetVddVolIndex(uint16 VolSample)
+{
+	uint8 Index = 0;
+	uint8 IndexMax = sizeof(VolTbl) / sizeof(VolTbl[0]);
+	
+	while(VolSample < VolTbl[Index])
+    {
+        Index++;
+        if(Index > (IndexMax - 1))
+        {
+            Index = IndexMax - 1;
+            break;
+        }
+        
+    }
+   return  Index;
+}
+
+/**********************************************************************/
+//Description:		BatteryCheckHandle for check battery voltag														  
+//Parameters:                        												  
+//Return:   											
+//Date:  
+//author:		    song
+/**********************************************************************/
+uint16_t BatteryCheckHandle(void)
+{
+	uint16_t BatSample = 0;
+	uint16_t BatVol = 0;
+#if 0
+	BatSample = GetVddSample(eVddIsink);
+	BatVol = GetVddVol(BatSample);
+
+	PwrAO.BatVolVdd = BatVol;
+	PwrAO.BatVolIndex = GetVddVolIndex(PwrAO.BatVolVdd);
+#else
+
+	BatSample = GetVddSample(eVddNormal);
+	PwrAO.BatVolVdd = GetVddVol(BatSample);
+	PwrAO.BatVolIndex = GetVddVolIndex(PwrAO.BatVolVdd);
+	
+	BatSample = GetVddSample(eVddIsink);
+	BatVol = GetVddVol(BatSample);;
+#endif
+
+
+#ifdef SUPPORT_BATTERY_DEBUG
+	printf("mcu bat:");
+	PrintVol(BatVol);
+	printf("(%d)\n\n", BatSample);
+#endif
+
+	if(BatVol < BATTERY_LEVEL_LOW)				// forbit mute voltage
+	{
+		PwrAO.BatCheckCntForbitMute++;
+		if(PwrAO.BatCheckCntForbitMute > 1)
+		{
+			PwrAO.BatCheckCntForbitMute = 1;
+			SysAO.eEventFlg |= eEventFlagLowBatForbitMute;
+			SysAO.eEventFlg &= ~eEventFlagLowBatMute;
+		}
+	}
+	else if(BatVol < BATTERY_LEVEL_1_IN_3)		// low voltage detect
+	{
+		PwrAO.BatCheckCntlow++;
+#ifdef SUPPORT_BATTERY_DEBUG 
+		printf("eEventFlg:0x%x\n\n",SysAO.eEventFlg);
+		printf("LowBatCheckCnt:%d\n",PwrAO.BatCheckCntlow);
+#endif
+		if(PwrAO.BatCheckCntlow > 1)
+		{
+			PwrAO.BatCheckCntlow = 1;
+			if(SysAO.eEventFlg & eEventFlagLowBatMute)
+			{
+				if(SysAO.EventMuteTimeCnt>LOWBAT_MUTE_COUT)
+				{
+					SysAO.eEventFlg &= ~eEventFlagLowBatMute;
+					SysAO.eEventFlg |= eEventFlagLowBat;
+				}
+				else
+				{
+					SysAO.EventMuteTimeCnt++;
+				}
+			}
+			else
+			{
+				SysAO.eEventFlg |= eEventFlagLowBat;
+			}
+		}
+		PwrAO.BatLevel = BatLevelLow;
+	}
+	else 
+	{
+		if(BatVol < BATTERY_LEVEL_2_IN_3)
+		{
+			if(PwrAO.BatCheckCnt2in3 >= 2) 
+			{
+				PwrAO.BatCheckCnt2in3 = 0;
+			}
+			else if(PwrAO.BatCheckCnt2in3 != 0)
+			{
+				PwrAO.BatCheckCnt2in3++;
+			}
+			PwrAO.BatLevel = BatLevel3_2;
+		}
+		else
+		{
+			PwrAO.BatLevel = BatLevelFull;
+		}
+
+		if(BatVol >(BATTERY_LEVEL_1_IN_3+50))
+		{
+			PwrAO.BatCheckCntlow = 0;
+			SysAO.eEventFlg &= ~eEventFlagLowBat;
+			SysAO.eEventFlg &= ~eEventFlagLowBatForbitMute;
+		}
+	}
+
+	if(PwrAO.BatOldLevel != PwrAO.BatLevel)
+	{
+		PwrAO.BatOldLevel = PwrAO.BatLevel;
+#ifdef SUPPORT_RF_NET_FUNCTION
+		if(RfAO.PairMode == ePairedHub)
+		{
+			UartSendMsg(eUartMsgFireAlarm, UartFirmAlarmMsgLowBat, PwrAO.BatOldLevel);
+		}
+#endif
+	}
+
+	return BatVol;
+}
+
+/**********************************************************************/
+//Description:		BatteryCheck										
+//Parameters:                        									
+//Return:   											
+//Date:  
+//author:		    song
+/**********************************************************************/
+void BatteryCheck(void)
+{	
+	if((SysAO.SlpTimeCnt%BATTERY_CHECK_COUNT)==(BATTERY_CHECK_COUNT-1))
+	{
+		BatteryCheckHandle();
+	}
+}
+
+
+

@@ -1,0 +1,133 @@
+/****************************************************************************/
+/*	File   :             Adc.c               */
+/*	Author :                       songjiang                                */
+/*	Version:                          V1.0                                  */
+/*	Date   :                    2019/7/25,16:30:31                         */
+/********************************Modify History******************************/
+/*   yy/mm/dd     F. Lastname    Description of Modification                */
+/****************************************************************************/
+/*	Attention:                                                              */
+/*	CopyRight:                CopyRight 2017--2025                          */
+/*           Shenzhen Xiaojun Technology Co., Ltd.  Allright Reserved        */
+/*	Project :                      SC01                           */
+/****************************************************************************/
+#include "base.h"
+#include "Adc.h"
+#include "Co.h"
+/**********************************************************************/
+//Description:		GetAdcSample														  
+//Parameters:                        												  
+//Return:   											
+//Date:  
+//author:		    song
+/**********************************************************************/
+uint16 GetAdcSample(eAdcChannel Channel, bool CoFualtCheckFlag)
+{ 
+    uint8 i;
+    uint16 TempTmp = 0;
+    uint16 AdcTmp = 0;
+    
+	//Step 1, Clk
+    _sacks2 = 0;         // fSYS/4
+    _sacks1 = 1;
+    _sacks0 = 0;
+
+	//Step 2, Enable
+	_adcen = 1;			// AD enable
+
+	//Step 3, External
+    _sains2 = 0;		//External input 
+    _sains1 = 0;
+    _sains0 = 0;
+
+	//Step 4, Channel
+	if(Channel == eAdcTempChannel)
+	{
+	    _sacs3 = 0;         //AN1
+	    _sacs2 = 0;
+	    _sacs1 = 0;
+	    _sacs0 = 1;
+	}
+	else if(Channel == eAdcBatChannel)
+	{
+	    _sacs3 = 0;         //AN6
+	    _sacs2 = 1;
+	    _sacs1 = 1;
+	    _sacs0 = 0;	
+	}
+	else if(Channel ==eAdcCoChannel)
+	{
+	    _sacs3 = 0;         //AN7
+	    _sacs2 = 1;
+	    _sacs1 = 1;
+	    _sacs0 = 1;	
+	}
+
+	//Step 6, Rerf VDD
+	//SAVRS1~SAVRS0(Bit4~3): A/D converter reference voltage select
+	//00: From external VREF pin
+	//01: Internal A/D converter power, VDD
+	// 1x:From external VREF pin
+	_savrs1 = 0;            //VDD 
+	_savrs0 = 1; 
+
+	//Step 7, Data format
+	_adrfs = 1;				//output data format:lsb 11 bit
+	
+	_vbgen = 0;				//VBGRC disable
+
+	if(Channel == eAdcTempChannel)
+	{
+		TEMPERATURE_DETECT_POWER_ON();               // temperature sensor power on 
+	}
+	else if(Channel == eAdcBatChannel)
+	{
+		BAT_DETECT_POWER_ON();
+	}
+	else if((Channel == eAdcCoChannel) && (CoFualtCheckFlag == TRUE))
+	{
+		CO_DETECT_FAULT_ON();
+		GCC_DELAY(10000);       // 10ms
+		CO_DETECT_FAULT_OFF();
+	}
+
+	//Step 9, 10
+	GCC_DELAY(100);       		// 100us
+	for(i=0; i<5; i++)
+	{
+		//start conversion
+		_start = 0;
+		_start = 1;
+		_start = 0;
+
+		//wait the conversion compelete
+		while(_adbz);           
+	
+		TempTmp= (uint16)(_sadoh);  
+		TempTmp = (uint16)((uint16)((uint16)TempTmp << 8) | _sadol);
+		if(i !=0)															//give up the first data
+		{
+			AdcTmp += TempTmp;
+		}
+	}
+	AdcTmp >>= 2;
+
+	if(Channel == eAdcTempChannel)
+	{
+		TEMPERATURE_DETECT_POWER_OFF();										// temperature sensor power off  
+	}
+	else if(Channel == eAdcBatChannel)
+	{
+		BAT_DETECT_POWER_OFF();
+	}
+	else if((Channel == eAdcCoChannel) && (CoFualtCheckFlag == TRUE))
+	{
+		CO_DETECT_FAULT_OFF();
+	}
+
+	//Step 11
+	_adcen = 0;             // adc disable
+
+	return AdcTmp;
+}
+

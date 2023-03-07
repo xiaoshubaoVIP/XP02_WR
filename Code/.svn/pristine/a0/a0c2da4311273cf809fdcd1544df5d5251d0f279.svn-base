@@ -1,0 +1,111 @@
+/*************************************************************************
+* Copyright (c) 2018 Shenzhen Xiaojun technology co. Ltd.All right reserved.
+* Author: chaofa.yan
+* Date: 2018/04/25
+* History Information
+* Author 		Date 		Description
+* chaofa.yan	2018/04/25 	Created the file
+*************************************************************************/
+
+#ifndef __POLLING_H__
+#define __POLLING_H__
+
+#include "base.h"
+
+#define SYSTEMTICKBASE   (1)
+
+#define TICK_UNIT 10 //ms
+
+//unit of Period is ms
+#define TMR_PERIOD(Period) \
+	((Period)<TICK_UNIT? 1: (((Period)+TICK_UNIT/2)/TICK_UNIT))
+
+
+#define TICK_UNIT500 1 //500ms
+
+//unit of Period is ms
+#define TMR_PERIOD500(Period) \
+	((Period)<TICK_UNIT500? 1: (((Period)+TICK_UNIT500/2)/TICK_UNIT500))
+
+typedef enum _eTimerHandle// position dot change
+{
+	eTmrHdlKeyScan = 0,
+	eTmrHdlKeyDouble,
+
+	eTmrHdlLedOff,
+	eTmrHdlBeepOff,
+	eTmrHdlKeyTest,
+
+	eTmrHdlSmoke,
+	eTmrHdlCo,
+	eTmrHdlMuteTimeout,
+
+#if 1//def SUPPORT_WIRED_NET_FUNCTION
+	eTmrHdlRFLed,
+	eTmrHdlRFTimeout,
+	eTmrHdlUartSendTimeout,
+	eTmrHdlGreenLedFlicker,
+	eTmrHdlGreenLedOff,
+#endif
+
+	eTmrHdlMax,
+}eTmrHdl;
+
+typedef uint16_t TmrCnt;
+
+typedef enum _eTimerFlag
+{
+	eTmrActitvityFlag = 1<<0,
+	eTmrTimeOutFlag = 1<<1,
+}eTimerFlag;
+
+#define CLEAN_TMR_FLAG(FlagVar, Flag) \
+	do{\
+		FlagVar = FlagVar & ~(Flag);\
+	}while(0)
+
+#define SET_TMR_FLAG(FlagVar, Flag) \
+	do{\
+		FlagVar = FlagVar | (Flag);\
+	}while(0)
+
+typedef struct _TimerInfo
+{
+	void* 		pCtx;
+	TmrCnt 		CurCnt;
+	TmrCnt 		ReloadCnt;
+	uint8_t 	TimerFlag; // eTimerFlag TimerFlag
+}TmrInfo;
+
+extern void TmrInitHeader(void);
+extern void TmrInsertTimer(eTmrHdl eHandle, TmrCnt ReloadCnt, void* pCtx);
+extern void TmrDeleteTimer(eTmrHdl eHandle);
+extern void Polling(void);
+
+extern void* TmrGetCtx(eTmrHdl eHandle);
+extern void TmrSetCurCnt(eTmrHdl eHandle, TmrCnt CurCnt);
+extern void TmrResetCurCnt(eTmrHdl eHandle);
+extern uint32_t TmrGetMbs(void);
+extern uint16_t GetTicks(void);
+extern uint16_t GetSysTicks(void);
+
+extern void PollingBeepOff(void);
+extern void PollingKey(eTmrHdl eHandle);
+extern void PollingLEDOff(void);
+extern void PollingSmoke(void *pTxt);
+extern void PollingCo(void *pTxt);
+extern void PollingMuteTimeout(void *pTxt);
+
+
+extern void PollingKeyScan(void);
+extern void PollingDoubleClickScan(void);
+
+extern void PollingRfTimeout(void);
+extern void RFLedFlash(void* Time);
+extern void PollingUartSendTimeout(void* SendCnt);
+
+extern void PollingGREENLEDFlicker(void* Time);
+extern void PollingGreenLEDOff(void);
+#endif
+
+

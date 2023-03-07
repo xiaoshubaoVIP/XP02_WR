@@ -1,0 +1,217 @@
+/****************************************************************************/
+/*	File   :             F:\Smoker\main.h               */
+/*	Author :                       songjiang                                */
+/*	Version:                          V1.0                                  */
+/*	Date   :                    2019/7/25,16:57:4                         */
+/********************************Modify History******************************/
+/*   yy/mm/dd     F. Lastname    Description of Modification                */
+/****************************************************************************/
+/*	Attention:                                                              */
+/*	CopyRight:                CopyRight 2017--2025                          */
+/*           Shenzhen Xiaojun Technology Co., Ltd.  Allright Reserved        */
+/*	Project :                      SC01                           */
+/****************************************************************************/
+
+#ifndef __MAIN_H__
+#define __MAIN_H__
+
+
+#include "base.h"
+#define TimeOutMax (60)
+#define SIGQUEUE   (10)
+
+#define SetHaltFlag(Flag) 		do{SysAO.haltFlag |= (Flag);}while(0)
+#define ClearHaltFlag(Flag)		do{SysAO.haltFlag &= ~(Flag);}while(0)
+#define GetHaltFlag()			(SysAO.haltFlag)
+
+#define	eHaltFlagNull 			(0)
+#define	eHaltFlagKey 			(1<<eTmrHdlKeyScan)
+
+
+typedef uint8_t		CailResult;
+#ifndef CailSuccess
+	#define CailSuccess	((CailResult) 1u)
+#endif
+#ifndef CailFail
+	#define CailFail	((CailResult) 0u)
+#endif  
+
+typedef enum{	
+	eCail_Smoke = 1,
+	eCail_Co_Step1,
+	eCail_Co_Step2,
+	eCail_Co_Step3,
+	eCail_Temp_Err,
+	eCail_BatErr,
+}eCailStep;
+
+typedef enum{
+	NormalMode = 0,
+	SmokeCailMode,
+	SmokeTestMode,
+	SmokeAlarmMode,
+	SmokeMuteMode,
+	SmokeErrMode,
+
+	CoCailMode,
+	CoTestMode,
+	CoAlarmMode,
+	CoMuteMode,
+	CoErrMode,
+	
+#ifdef SUPPORT_WIRED_NET_FUNCTION
+	NetSmokeMasterTestMode,			//11
+	NetCoMasterTestMode,			//12
+	NetSmokeAlarmMode,				//13
+	NetCoAlarmMode,					//14
+#endif
+
+#ifdef SUPPORT_RF_NET_FUNCTION
+	RadioFactoryMode,
+	RadioPairHubMode,
+	RadioPairSlaverMode,
+	RadioPairMasterMode,
+	RadioSmokeAlarmMode,
+	RadioCoAlarmMode,
+	RadioHubTestMode,
+	RadioIntranetMasterTestMode,
+	RadioIntranetSlaverTestMode,
+#endif
+
+#ifdef SUPPORT_SPEAK_FUNCTION
+	LocationSetMode,
+#endif
+
+}eStateMode;
+
+typedef enum _eEventSig
+{
+	eEventSigNULL=0x0,
+	eEventSigEnteryMode,
+	eEventSigWakeup,
+	eEventSigLowBat,
+	eEventSigSensorCheck,
+	eEventSigEndLife,							//5
+
+	//Key
+	eEventSigKey1Clik,
+	eEventSigKey1DoubleClik,
+	eEventSigKey1ThreeClik,
+	eEventSigKey1FourTimesClik,
+	eEventSigKey1LongClik,						//10
+
+	//Set Key
+	eEventSigKey3Clik,
+	eEventSigKey3DoubleClik,
+	eEventSigKey3ThreeClik,
+	eEventSigKey3FourTimesClik,
+	eEventSigKey3LongClik,						//15
+
+	//Smoke
+	eEventSigSmokeCailTimeout,
+	eEventSigSmokeTestDelayInCotest,
+	eEventSigSmokeTest,
+	eEventSigSmokeTestCancel,
+	eEventSigSmokeAlarm,						//20
+	eEventSigSmokeAlarmTimeout,
+	eEventSigSmokeAlarmIntervalTimeout,
+	eEventSigSmokeAlarmCancel,
+	eEventSigSmokeKeyMute,
+	eEventSigSmokeMute,
+	eEventSigSmokeMuteTimeout,
+	eEventSigSmokeMuteFinished,
+	eEventSigSmokeErr,
+	eEventSigSmokeErrTimeout,
+	eEventSigSmokeErrRecovery,					//30
+
+	//Co
+	eEventSigCoCailTimeout,
+	eEventSigCoTest,
+	eEventSigCoTestCancel,
+	eEventSigCoAlarm,
+	eEventSigCoAlarmTimeout,					//35
+	eEventSigCoAlarmIntervalTimeout,
+	eEventSigCoAlarmCancel,
+	eEventSigCoMute,
+	eEventSigCoMuteTimeout,
+	eEventSigCoMuteFinished,					//40
+	eEventSigCoErr,	
+	eEventSigCoErrTimeout,
+	eEventSigCoErrRecovery,						//43
+
+	//Net
+	eEventSigNetSmokeAlarm,
+	eEventSigNetSmokeAlarmTimeout,
+	eEventSigNetCancelSmokeAlarm,
+	eEventSigNetCoAlarm,
+	eEventSigNetCoAlarmTimeout,
+	eEventSigNetCancelCoAlarm,
+
+	//Radio
+	eEventSigRadioTimeout,
+	eEventSigPairSuccess,
+	eEventSigPairFail,
+	eEventSigResetIDOK,
+	eEventSigRadioHubTest,
+	eEventSigRadioIntranetTestKeyStop,
+	eEventSigRadioIntranetTestStart,
+	eEventSigRadioIntranetTestStop,
+	eEventSigRadioSmokeAlarm,
+	eEventSigRadioSmokeAlarmTimeout,
+	eEventSigRadioCoAlarm,
+	eEventSigRadioCoAlarmTimeout,
+	eEventSigRadioCancelAlarm,
+
+#ifdef SUPPORT_SPEAK_FUNCTION
+	eEventSigSetLocationTimeout,
+	eEventSigSetLocationSuccess,
+	eEventSigSetLocationFail,
+#endif
+}eEventSig;
+
+struct SystemQueueObject{
+//	uint8_t sig;		//Que
+	eEventSig sig;
+
+	uint8_t atrr;		//0:no use	1:used	
+};
+
+typedef struct SystemObject SystemObjectTag;
+struct SystemObject{
+	eStateMode eMode;							//system mode
+	eStateMode eOldMode;
+	eEventSig sig;
+	uint8_t attrQF__;							//private attribute used 
+	eEventFlag eEventFlg; 						//current need handle event
+	uint16 LifeTimeDays;						// smoke life restore
+	uint8 LifeTimeUpdateFlag; 					// one day flag
+	uint16 SlpTimeCnt;							// add every 9s
+	uint16 EventMuteTimeCnt;
+	bool DebugOnFlag;
+	bool PowerTestFlag;
+	uint8 TempData;
+
+	uint16 StdbyTimeCnt;						//	standby counter 
+
+	uint32_t haltFlag; 							//  haltflag :0 halt 1:active
+	struct SystemQueueObject sigQue[SIGQUEUE];	//  signal of the event instance 
+};
+
+extern uint16_t SMOKE_ALARM_LEVEL;
+extern SystemObjectTag SysAO;
+void LedInit(void);
+void CailRes(CailResult Res, eCailStep eStep);
+void CailStepDisplay(eCailStep eStep);
+void PowerOnWelcomeAndDisplay(void);
+void TimerTb0Init(eTbnTime time);
+void SysWakeUpInit(eWakeupTime time);
+void PollingBeep(uint16 Time);
+void PollingLED(uint16 Time);
+void ErrIndex(uint8_t LedFlag,uint8_t BeepFlag,uint8_t Num);
+void SysteSetSig(eEventSig sig);
+
+void PollingGreenLED(uint16 Time);
+void PollingRFLED(uint16 Time);
+
+#endif
+

@@ -1,0 +1,90 @@
+#include "main.h"
+#include "Module.h"
+#include "Speaker.h"
+
+#ifdef SUPPORT_SPEAK_FUNCTION
+
+
+#define EnableVoiceVcc()	{SPEAK_VCC_EN_PIN = 0;}
+#define DisableVoiceVcc()	{SPEAK_VCC_EN_PIN = 1;}
+#define SetDataPin()		{SPEAK_DATA_PIN = 1;}
+#define ResetDataPin()		{SPEAK_DATA_PIN = 0;}
+#define	VOICE_IS_BUSY() 	(SPEAK_BUSY_PIN != RESET)
+
+/**********************************************************************/
+//Description:	SpeakerSendCmd											
+//Parameters:                        									
+//Return:   															
+//Date:           quanwu.xu  
+/**********************************************************************/
+void SendCmd(uint8_t VoiceData)//25ms
+{
+	uint8_t i = 0;
+
+	SetDataPin();
+	GCC_DELAY(8000);						//8ms
+	ResetDataPin();
+	GCC_DELAY(1000);							//1ms
+
+	for(i = 0; i < 8; i++)
+	{
+		if(VoiceData & 0x80)				// output 1
+		{
+			SetDataPin() ;
+			GCC_DELAY(1500);				
+			ResetDataPin();
+			GCC_DELAY(500);
+		}
+		else								// output 0
+		{
+			SetDataPin() ;
+			GCC_DELAY(500);
+			ResetDataPin();
+			GCC_DELAY(1500);
+		}
+		VoiceData = VoiceData <<1;			// ÏÈ·¢ËÍ¸ßbit	
+	}
+}
+
+
+/**********************************************************************/
+//Description:	SpeakerSendCmd											
+//Parameters:                        									
+//Return:   															
+//Date:           quanwu.xu  
+/**********************************************************************/
+void SpeakerSendCmd(uint8_t VoiceData)
+{
+	EnableVoiceVcc();
+	GCC_DELAY(10000);
+
+	while(VOICE_IS_BUSY());
+	SendCmd(VoiceData);
+	GCC_DELAY(5000);
+	while(VOICE_IS_BUSY())
+	{
+		_clrwdt();
+		Polling();
+		KeyHandleMsg();
+	}
+
+	DisableVoiceVcc();
+}
+
+/**********************************************************************/
+//Description:	SpeakerInit											
+//Parameters:                        									
+//Return:   															
+//Date:           quanwu.xu  
+/**********************************************************************/
+void SpeakerInit(void)
+{
+	EnableVoiceVcc();
+	GCC_DELAY(10000);
+
+	SpeakerSendCmd(CMD_MUSIC_VOLUME_15);
+
+	EnableVoiceVcc();
+}
+#endif
+
